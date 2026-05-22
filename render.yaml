@@ -8,3 +8,5 @@ services:
     envVars:
       - key: DATACRAZY_TOKEN
         sync: false
+      - key: DATACRAZY_MCP_URL
+        value: https://mcp.g1.datacrazy.io/api/mcp
