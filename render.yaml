@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: dash-datacrazy
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: DATACRAZY_TOKEN
+        sync: false
