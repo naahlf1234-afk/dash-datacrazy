@@ -129,9 +129,11 @@ function setupModeTabs() {
       ind.className = "mode-indicator mode-" + currentMode;
       const lbl = document.getElementById("modeLabel");
       lbl.textContent = currentMode === "otimista"
-        ? "Otimista — Confirmadas + Reservas/Futuros"
-        : "Realista — Só vendas confirmadas (AGENDADO)";
-      loadMetricas();
+        ? "Otimista — todas as vendas AGENDADAS"
+        : "Realista — só vendas com contrato formalizado";
+      // Re-renderiza usando o cache (sem novo fetch) se já tem dado
+      if (_cacheResumo && _cacheFat) renderMetricasCards();
+      else loadMetricasBasicas();
     });
   });
 }
@@ -151,37 +153,53 @@ function setCount(id, n) {
 }
 
 // ====== CARDS DE MÉTRICAS (separados em 2 grupos pra cada um renderizar quando chega) ======
+// Os 8 cards dependem de resumo + faturamento. Carrega os 2 em paralelo
+// e renderiza os 8 cards de uma vez quando ambos chegam.
+let _cacheResumo = null;
+let _cacheFat = null;
+
 async function loadMetricasBasicas() {
-  // Linha 1: Leads, Vendas, Futuros, % Conversão
   try {
-    const resumo = await fetchJson("/api/resumo");
-    const vendasConfirm = resumo.vendas;
-    const futuros = resumo.em_fechamento;
-    const totalVendas = currentMode === "otimista" ? vendasConfirm + futuros : vendasConfirm;
-    document.getElementById("mLeads").textContent = resumo.total_leads.toLocaleString("pt-BR");
-    document.getElementById("mVendas").textContent = totalVendas;
-    document.getElementById("mVendasHint").textContent = `${vendasConfirm} confirm. · ${futuros} futuros`;
-    document.getElementById("mFuturos").textContent = futuros;
-    const taxaConv = resumo.total_leads ? (totalVendas / resumo.total_leads * 100) : 0;
-    document.getElementById("mConversao").textContent = fmtPct(taxaConv);
+    const [resumo, fat] = await Promise.all([
+      fetchJson("/api/resumo"),
+      fetchJson("/api/faturamento"),
+    ]);
+    _cacheResumo = resumo;
+    _cacheFat = fat;
+    renderMetricasCards();
   } catch (e) { console.error("loadMetricasBasicas:", e); }
 }
 
-async function loadMetricasFinanceiras() {
-  // Linha 2: Faturamento, Ticket, % 6 meses, % Antecipadas
-  try {
-    const fat = await fetchJson("/api/faturamento");
-    document.getElementById("mFaturamento").textContent = fmtBRL(fat.faturamento);
-    document.getElementById("mTicket").textContent = fmtBRL(fat.ticket_medio);
-    document.getElementById("mSeisMeses").textContent = fmtPct(fat.pct_6_meses);
-    document.getElementById("mAntecipadas").textContent = fmtPct(fat.pct_antecipadas);
-  } catch (e) { console.error("loadMetricasFinanceiras:", e); }
+function renderMetricasCards() {
+  if (!_cacheResumo || !_cacheFat) return;
+  const resumo = _cacheResumo;
+  const fat = _cacheFat;
+
+  // Otimista = todas as AGENDADO. Realista = só com contrato formalizado.
+  const totalAgendado = resumo.vendas;
+  const comContrato = fat.com_contrato;
+  const semContrato = fat.sem_contrato;
+  const totalVendas = currentMode === "otimista" ? totalAgendado : comContrato;
+
+  // Linha 1
+  document.getElementById("mLeads").textContent = resumo.total_leads.toLocaleString("pt-BR");
+  document.getElementById("mVendas").textContent = totalVendas;
+  document.getElementById("mVendasHint").textContent =
+    `${comContrato} com contrato · ${semContrato} sem`;
+  document.getElementById("mFuturos").textContent = semContrato;
+  const taxaConv = resumo.total_leads ? (totalVendas / resumo.total_leads * 100) : 0;
+  document.getElementById("mConversao").textContent = fmtPct(taxaConv);
+
+  // Linha 2
+  document.getElementById("mFaturamento").textContent = fmtBRL(fat.faturamento);
+  document.getElementById("mTicket").textContent = fmtBRL(fat.ticket_medio);
+  document.getElementById("mSeisMeses").textContent = fmtPct(fat.pct_6_meses);
+  document.getElementById("mAntecipadas").textContent = fmtPct(fat.pct_antecipadas);
 }
 
-// Mantém função antiga pra compat (mode-tab usa)
-async function loadMetricas() {
-  await Promise.allSettled([loadMetricasBasicas(), loadMetricasFinanceiras()]);
-}
+// Stub mantido pra compat com loadAll (vazio porque já vem em loadMetricasBasicas)
+async function loadMetricasFinanceiras() { /* coberto por loadMetricasBasicas */ }
+async function loadMetricas() { await loadMetricasBasicas(); }
 
 async function loadVendedoresCount() {
   try {
@@ -571,8 +589,7 @@ async function loadAll() {
   if (syncTime) syncTime.textContent = `${ts} (atualizando…)`;
 
   const tasks = [
-    ["m-basicas", loadMetricasBasicas],
-    ["m-financ", loadMetricasFinanceiras],
+    ["m-cards", loadMetricasBasicas],
     ["vend-count", loadVendedoresCount],
     ["funil", loadFunil],
     ["ranking", loadRanking],
