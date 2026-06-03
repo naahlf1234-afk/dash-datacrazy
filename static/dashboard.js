@@ -336,9 +336,7 @@ async function loadVendedoresGrid() {
 
     grid.querySelectorAll(".vendedor-card").forEach(card => {
       card.addEventListener("click", () => {
-        // Por enquanto, troca pra tab Dashboard e abre a carteira
-        document.querySelector('.nav-item[data-tab="dashboard"]').click();
-        setTimeout(() => loadCarteira(card.dataset.user, card.dataset.name), 200);
+        loadVendedorDetail(card.dataset.user, card.dataset.name);
       });
     });
     grid.dataset.loaded = "1";
@@ -346,6 +344,130 @@ async function loadVendedoresGrid() {
     grid.innerHTML = `<div class="placeholder-panel"><p>Erro ao carregar vendedores: ${e.message}</p></div>`;
   }
 }
+
+// ====== FICHA INDIVIDUAL DO VENDEDOR ======
+let _vdChart = null;
+
+async function loadVendedorDetail(userId, nome) {
+  const sec = document.getElementById("vendedorDetail");
+  sec.style.display = "block";
+  document.getElementById("vdHeader").textContent = `👤 ${nome}`;
+  document.getElementById("vdStats").innerHTML = '<div style="grid-column:1/-1;padding:20px;color:var(--text-dim)">Carregando…</div>';
+  sec.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  try {
+    const data = await fetchJson(`/api/vendedor/${userId}`);
+    const s = data.stats;
+
+    document.getElementById("vdStats").innerHTML = `
+      <div class="vd-stat vd-stat-success">
+        <div class="vd-stat-label">Vendas hoje</div>
+        <div class="vd-stat-value">${s.vendas_hoje}</div>
+      </div>
+      <div class="vd-stat vd-stat-success">
+        <div class="vd-stat-label">Faturamento</div>
+        <div class="vd-stat-value">${fmtBRL(s.faturamento)}</div>
+      </div>
+      <div class="vd-stat">
+        <div class="vd-stat-label">Total agendado</div>
+        <div class="vd-stat-value">${s.total_agendado}</div>
+      </div>
+      <div class="vd-stat vd-stat-danger">
+        <div class="vd-stat-label">Sem contrato</div>
+        <div class="vd-stat-value">${s.sem_contrato}</div>
+      </div>
+      <div class="vd-stat">
+        <div class="vd-stat-label">Ticket médio</div>
+        <div class="vd-stat-value">${fmtBRL(s.ticket_medio)}</div>
+      </div>
+      <div class="vd-stat">
+        <div class="vd-stat-label">% 6 meses</div>
+        <div class="vd-stat-value">${fmtPct(s.pct_6_meses)}</div>
+      </div>
+      <div class="vd-stat vd-stat-warn">
+        <div class="vd-stat-label">% Antecipadas</div>
+        <div class="vd-stat-value">${fmtPct(s.pct_antecipadas)}</div>
+      </div>
+    `;
+
+    // Tendência 14 dias
+    const ctx = document.getElementById("vdChartTendencia").getContext("2d");
+    if (_vdChart) _vdChart.destroy();
+    _vdChart = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: data.tendencia_14_dias.map(d => d.label),
+        datasets: [{
+          label: "Vendas",
+          data: data.tendencia_14_dias.map(d => d.vendas),
+          backgroundColor: "#22c55e",
+          borderRadius: 3,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: "#64748b", font: { size: 10 } }, grid: { display: false } },
+          y: { ticks: { color: "#64748b", stepSize: 1 }, grid: { color: "#e6e8ee" }, beginAtZero: true },
+        },
+      },
+    });
+
+    // Vendas do dia
+    setCount("vdCountHoje", data.vendas_hoje.length);
+    const tbody = document.querySelector("#vdTableHoje tbody");
+    if (!data.vendas_hoje.length) {
+      tbody.innerHTML = `<tr><td colspan="6" style="color:var(--text-dim)">Nenhuma venda agendada hoje.</td></tr>`;
+    } else {
+      tbody.innerHTML = data.vendas_hoje.map(v => {
+        const nome = v.lead_name_contrato || v.lead_name_original || "—";
+        const valor = v.valor ? fmtBRL(v.valor) : "—";
+        const plano = v.plano_meses ? `${v.plano_meses} meses` : "—";
+        let pagTag;
+        if (!v.pagamento) pagTag = '<span class="tag-paid tag-paid-sem">—</span>';
+        else if (v.is_antecipada) pagTag = `<span class="tag-paid tag-paid-antecip">${v.pagamento}</span>`;
+        else pagTag = `<span class="tag-paid tag-paid-boleto">${v.pagamento}</span>`;
+        const hora = v.movido_em ? new Date(v.movido_em).toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"}) : "—";
+        const status = v.tem_contrato
+          ? '<span style="color:#16a34a;font-weight:600">✓ Contrato</span>'
+          : '<span style="color:var(--danger);font-weight:600">⚠ Sem contrato</span>';
+        return `
+          <tr>
+            <td><b>${nome}</b><br><small style="color:var(--text-dim)">#${v.code}</small></td>
+            <td><b>${valor}</b></td>
+            <td>${plano}</td>
+            <td>${pagTag}</td>
+            <td>${hora}</td>
+            <td>${status}</td>
+          </tr>
+        `;
+      }).join("");
+    }
+
+    // Carrega notas do localStorage
+    const notasKey = `vd-notas-${userId}`;
+    const notas = localStorage.getItem(notasKey) || "";
+    const ta = document.getElementById("vdNotas");
+    ta.value = notas;
+    const statusEl = document.getElementById("vdNotasStatus");
+    statusEl.textContent = notas ? "Salvo localmente" : "Sem notas ainda";
+
+    document.getElementById("vdNotasSalvar").onclick = () => {
+      localStorage.setItem(notasKey, ta.value);
+      statusEl.textContent = `Salvo · ${new Date().toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"})}`;
+    };
+  } catch (e) {
+    document.getElementById("vdStats").innerHTML =
+      `<div style="grid-column:1/-1;padding:20px;color:var(--danger)">Erro: ${e.message}</div>`;
+    console.error("loadVendedorDetail:", e);
+  }
+}
+
+document.getElementById("vdClose")?.addEventListener("click", () => {
+  document.getElementById("vendedorDetail").style.display = "none";
+});
 
 // ====== CARTEIRA ======
 const CARTEIRA_RESUMO_LIMITE = 8;

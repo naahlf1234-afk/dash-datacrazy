@@ -6,7 +6,7 @@ import threading
 import time
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
@@ -228,6 +228,88 @@ def contratos():
         "com_contrato": sum(1 for d in in_window if d["contract"]),
         "sem_contrato": sum(1 for d in in_window if not d["contract"]),
         "lista": in_window,
+    })
+
+
+@app.route("/api/vendedor/<user_id>")
+def vendedor_detail(user_id: str):
+    """Ficha individual: stats, vendas do dia (com nome real do contrato),
+    tendência 14 dias."""
+    vendedor = next((v for v in dc.VENDEDORES if v["userId"] == user_id), None)
+    if not vendedor:
+        return jsonify({"error": "vendedor não encontrado"}), 404
+
+    att_to_user = dc.attendant_id_to_user_id()
+    user_to_att = {u: a for a, u in att_to_user.items()}
+    attendant_id = user_to_att.get(user_id)
+
+    all_contracts = _get_all_contracts_cached()
+    do_vendedor = [c for c in all_contracts if c.get("attendantId") == attendant_id]
+    com_contrato = [c for c in do_vendedor if c["contract"]]
+
+    # Vendas do dia (em horário Brasília aproximado: lastMovedAt está em UTC)
+    # Simplificação: considera "hoje" como UTC. Refina depois.
+    today = _now_utc().date()
+    vendas_hoje = []
+    for c in do_vendedor:
+        moved = _parse_iso(c.get("lastMovedAt"))
+        if not moved or moved.date() != today:
+            continue
+        ct = c.get("contract") or {}
+        vendas_hoje.append({
+            "code": c.get("code"),
+            "businessId": c.get("businessId"),
+            "leadId": c.get("leadId"),
+            "lead_name_original": c.get("leadName"),
+            "lead_name_contrato": ct.get("nome_completo"),
+            "valor": ct.get("valor"),
+            "plano_meses": ct.get("plano_meses"),
+            "pagamento": ct.get("pagamento"),
+            "is_antecipada": ct.get("is_antecipada"),
+            "movido_em": c.get("lastMovedAt"),
+            "tem_contrato": bool(c.get("contract")),
+        })
+    vendas_hoje.sort(key=lambda x: x["movido_em"] or "", reverse=True)
+
+    # Tendência 14 dias
+    tendencia = []
+    today_dt = _now_utc().date()
+    for i in range(13, -1, -1):
+        dia = today_dt - timedelta(days=i)
+        count = sum(
+            1 for c in do_vendedor
+            if (m := _parse_iso(c.get("lastMovedAt"))) and m.date() == dia
+        )
+        tendencia.append({
+            "data": dia.isoformat(),
+            "label": dia.strftime("%d/%m"),
+            "vendas": count,
+        })
+
+    valores = [c["contract"]["valor"] for c in com_contrato if c["contract"].get("valor")]
+    faturamento = sum(valores)
+    ticket = faturamento / len(valores) if valores else 0
+
+    # mix de plano
+    seis = sum(1 for c in com_contrato if c["contract"].get("plano_meses") == 6)
+    tres = sum(1 for c in com_contrato if c["contract"].get("plano_meses") == 3)
+    antecip = sum(1 for c in com_contrato if c["contract"].get("is_antecipada") is True)
+
+    return jsonify({
+        "vendedor": vendedor,
+        "stats": {
+            "total_agendado": len(do_vendedor),
+            "com_contrato": len(com_contrato),
+            "sem_contrato": len(do_vendedor) - len(com_contrato),
+            "vendas_hoje": len(vendas_hoje),
+            "faturamento": round(faturamento, 2),
+            "ticket_medio": round(ticket, 2),
+            "pct_6_meses": round((seis / len(com_contrato) * 100), 1) if com_contrato else 0,
+            "pct_3_meses": round((tres / len(com_contrato) * 100), 1) if com_contrato else 0,
+            "pct_antecipadas": round((antecip / len(com_contrato) * 100), 1) if com_contrato else 0,
+        },
+        "vendas_hoje": vendas_hoje,
+        "tendencia_14_dias": tendencia,
     })
 
 

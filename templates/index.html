@@ -399,17 +399,57 @@
         <!-- preenchido via JS -->
       </div>
 
-      <div class="placeholder-panel" style="margin-top: 24px">
-        <div class="placeholder-icon">👥</div>
-        <h3>Ficha completa em construção</h3>
-        <p>Ao clicar em um vendedor virá:</p>
-        <ul>
-          <li>Tendência últimos 14 dias (gráfico)</li>
-          <li>Vendas do dia <b>extraídas do contrato</b> (nome real, valor real)</li>
-          <li>Timeline de atividade do dia</li>
-          <li>Campo de notas suas (feedback registrado)</li>
-        </ul>
-      </div>
+      <!-- Ficha individual (aparece quando clica num card) -->
+      <section id="vendedorDetail" class="panel" style="display:none; margin-top: 24px">
+        <header class="panel-header">
+          <h2 id="vdHeader">—</h2>
+          <button id="vdClose" class="btn btn-ghost btn-icon">×</button>
+        </header>
+
+        <div class="vd-stats" id="vdStats"></div>
+
+        <div class="grid-2" style="margin-top: 24px">
+          <div class="panel" style="margin: 0">
+            <header class="panel-header">
+              <h2>📈 Tendência últimos 14 dias</h2>
+            </header>
+            <canvas id="vdChartTendencia"></canvas>
+          </div>
+          <div class="panel" style="margin: 0">
+            <header class="panel-header">
+              <h2>📝 Notas do gerente</h2>
+              <span class="panel-sub">Salvo só nesse navegador</span>
+            </header>
+            <textarea id="vdNotas" class="vd-notas-textarea" placeholder="Anote feedback, próximos passos, observações sobre esse vendedor…"></textarea>
+            <div class="vd-notas-foot">
+              <span id="vdNotasStatus">—</span>
+              <button id="vdNotasSalvar" class="btn btn-primary btn-sm">Salvar</button>
+            </div>
+          </div>
+        </div>
+
+        <section class="panel" style="margin-top: 24px">
+          <header class="panel-header">
+            <h2>💰 Vendas do dia <span id="vdCountHoje" class="count-badge">—</span></h2>
+            <span class="panel-sub">Dados extraídos do contrato enviado na conversa</span>
+          </header>
+          <div class="table-wrap">
+            <table id="vdTableHoje">
+              <thead>
+                <tr>
+                  <th>Lead (nome real)</th>
+                  <th>Valor</th>
+                  <th>Plano</th>
+                  <th>Pagamento</th>
+                  <th>Hora</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
     </section>
 
     <!-- =================== TAB: REGISTROS =================== -->
