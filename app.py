@@ -638,26 +638,44 @@ def correcoes_aplicar():
 @app.route("/api/sem-contrato")
 def sem_contrato():
     """Vendas AGENDADAS que NÃO têm contrato enviado na conversa do CRM.
-    Esse é o alerta principal pra o gerente: venda suspeita / não formalizada."""
+    Só conta vendedores ATIVOS (ex-vendedores como Jeremias ficam de fora).
+    Kauã e outros ativos aparecem na lista mesmo com 0 pra ficar visível
+    que estão no time."""
     df, dt = _get_period()
     all_data = _get_all_contracts_cached()
     in_window = _filter_contracts_in_period(all_data, df, dt)
-    sem = [d for d in in_window if not d["contract"]]
+
+    # filtra só dos vendedores ativos
+    att_to_user = dc.attendant_id_to_user_id()
+    ativos_user_ids = {v["userId"] for v in dc.VENDEDORES}
+
+    in_window_ativos = []
+    for d in in_window:
+        att_id = d.get("attendantId")
+        if not att_id:
+            continue
+        user_id = att_to_user.get(att_id)
+        if user_id in ativos_user_ids:
+            in_window_ativos.append(d)
+
+    sem = [d for d in in_window_ativos if not d["contract"]]
     sem.sort(key=lambda x: x.get("lastMovedAt") or "", reverse=True)
 
-    # agrupa por vendedor pra mostrar quem tá deixando passar
-    by_vendedor: dict[str, int] = {}
+    # inicia contagem com 0 pra cada ativo (Kauã etc aparecem mesmo zerado)
+    by_vendedor_count: dict[str, int] = {v["name"]: 0 for v in dc.VENDEDORES}
     for d in sem:
-        n = d["attendantName"]
-        by_vendedor[n] = by_vendedor.get(n, 0) + 1
+        n = (d.get("attendantName") or "").strip()
+        if n in by_vendedor_count:
+            by_vendedor_count[n] += 1
+
     by_vendedor_list = sorted(
-        [{"vendedor": k, "count": v} for k, v in by_vendedor.items()],
+        [{"vendedor": k, "count": v} for k, v in by_vendedor_count.items()],
         key=lambda x: x["count"], reverse=True,
     )
 
     return jsonify({
         "total_sem_contrato": len(sem),
-        "total_no_periodo": len(in_window),
+        "total_no_periodo": len(in_window_ativos),
         "por_vendedor": by_vendedor_list,
         "lista": sem[:50],
     })
