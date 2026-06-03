@@ -180,6 +180,27 @@ def leads(date_from: str | None = None, date_to: str | None = None) -> list[dict
     return data
 
 
+def leads_count(date_from: str | None = None, date_to: str | None = None) -> int:
+    """Conta total de leads sem paginar — 1 chamada só com limit=1.
+    Bem mais rápido que carregar a base inteira."""
+    key = ("leads_count", date_from, date_to)
+    cached = _cache.get(key)
+    if cached is not None:
+        return cached
+    args: dict[str, Any] = {"limit": 1}
+    if date_from:
+        args["createdAtGreaterOrEqual"] = date_from
+    if date_to:
+        args["createdAtLessOrEqual"] = date_to
+    result = _call_tool("lead_list", args)
+    count = result.get("count")
+    if count is None:
+        # fallback: tenta data + len
+        count = len(result.get("data", []))
+    _cache.set(key, count)
+    return count
+
+
 def conversations(status: str = "all") -> list[dict]:
     key = ("conv", status)
     cached = _cache.get(key)

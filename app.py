@@ -87,10 +87,9 @@ def resumo():
     """Cards de topo: vendas, em fechamento (pre-venda humana), desqualificados, leads, conversas."""
     df, dt = _get_period()
     businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
-    # Leads: não filtra por data (formato YYYY-MM-DD não é aceito pelo MCP e
-    # ISO completo é caro de paginar). total_leads conta a base inteira;
-    # taxa_conversao usa total_leads, então o % fica subestimado mas estável.
-    leads_list = dc.leads()
+    # leads_count faz 1 chamada só (com limit=1, pega o campo count) em vez de
+    # paginar a base inteira (9k+ leads = 90+ requests). Muito mais rápido.
+    total_leads = dc.leads_count()
     convs = dc.conversations(status="opened")
 
     total_negocios = len(businesses)
@@ -110,7 +109,7 @@ def resumo():
         "em_fechamento": em_fechamento,
         "desqualificados": desqualificados,
         "taxa_conversao": taxa_conversao,
-        "total_leads": len(leads_list),
+        "total_leads": total_leads,
         "conversas_abertas": len(convs),
     })
 
