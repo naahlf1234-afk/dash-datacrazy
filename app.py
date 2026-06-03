@@ -231,6 +231,112 @@ def contratos():
     })
 
 
+@app.route("/api/passou-fechamento")
+def passou_fechamento():
+    """Aproximação: leads que estão em estágios pós-fechamento (ou ainda em
+    fechamento) com lastMovedAt no dia pedido = passaram pelo FECHAMENTO nesse dia.
+
+    Funciona porque no fluxo COD o vendedor responde rápido — o dia em que o
+    lead saiu de FECHAMENTO ≈ dia em que ele entrou em FECHAMENTO.
+
+    Filtros:
+    - ?dia=YYYY-MM-DD (default: hoje em horário Brasília)
+    - ?dias=N (alternativa: últimos N dias)
+    """
+    from datetime import date
+    dia_str = request.args.get("dia")
+    dias = int(request.args.get("dias", 0))
+
+    # FECHAMENTO e tudo que vem DEPOIS dele no funil
+    estagios_apos = {"FECHAMENTO", "AGENDADO", "FOLLOW-UP", "LEAD PRA O FUTURO", "DESQUALIFICADO"}
+
+    # Brasília = UTC-3
+    BRT = timezone(timedelta(hours=-3))
+
+    if dia_str:
+        try:
+            dia_dt = date.fromisoformat(dia_str)
+        except ValueError:
+            return jsonify({"error": "dia inválido (use YYYY-MM-DD)"}), 400
+        day_start_brt = datetime(dia_dt.year, dia_dt.month, dia_dt.day, 0, 0, 0, tzinfo=BRT)
+        day_end_brt = datetime(dia_dt.year, dia_dt.month, dia_dt.day, 23, 59, 59, tzinfo=BRT)
+        day_start = day_start_brt.astimezone(timezone.utc)
+        day_end = day_end_brt.astimezone(timezone.utc)
+    elif dias > 0:
+        day_end = _now_utc()
+        day_start = day_end - timedelta(days=dias)
+    else:
+        now_brt = _now_utc().astimezone(BRT)
+        today_brt = now_brt.date()
+        day_start = datetime(today_brt.year, today_brt.month, today_brt.day, 0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
+        day_end = datetime(today_brt.year, today_brt.month, today_brt.day, 23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
+
+    all_biz = dc.all_businesses_api_pipeline()
+
+    filtrados = []
+    for b in all_biz:
+        if b.get("stageName") not in estagios_apos:
+            continue
+        moved = _parse_iso(b.get("lastMovedAt"))
+        if not moved or moved < OPERATION_START_DATE:
+            continue
+        if moved < day_start or moved > day_end:
+            continue
+        filtrados.append(b)
+
+    att_to_user = dc.attendant_id_to_user_id()
+    by_user: dict[str, dict] = {
+        v["userId"]: {"vendedor": v, "count": 0, "negocios": [], "destinos": Counter()}
+        for v in dc.VENDEDORES
+    }
+    sem_dono = {"vendedor": {"userId": None, "name": "Sem atendente"}, "count": 0, "negocios": [], "destinos": Counter()}
+    outros = {"vendedor": {"userId": "outros", "name": "Outros (ex-vendedores)"}, "count": 0, "negocios": [], "destinos": Counter()}
+
+    for b in filtrados:
+        att_id = b.get("attendantId")
+        if not att_id:
+            bucket = sem_dono
+        else:
+            user_id = att_to_user.get(att_id)
+            bucket = by_user.get(user_id, outros) if user_id else outros
+        bucket["count"] += 1
+        bucket["destinos"][b.get("stageName")] += 1
+        bucket["negocios"].append({
+            "code": b.get("code"),
+            "leadId": b.get("leadId"),
+            "leadName": b.get("leadName"),
+            "lastMovedAt": b.get("lastMovedAt"),
+            "destino_atual": b.get("stageName"),
+        })
+
+    for bucket in list(by_user.values()) + [sem_dono, outros]:
+        bucket["negocios"].sort(key=lambda x: x.get("lastMovedAt") or "", reverse=True)
+        bucket["destinos"] = dict(bucket["destinos"])
+
+    result = list(by_user.values())
+    if outros["count"] > 0:
+        result.append(outros)
+    if sem_dono["count"] > 0:
+        result.append(sem_dono)
+    result.sort(key=lambda x: x["count"], reverse=True)
+
+    # Resumo de destinos (pro dashboard)
+    destinos_total = Counter()
+    for b in filtrados:
+        destinos_total[b.get("stageName")] += 1
+
+    return jsonify({
+        "total": len(filtrados),
+        "periodo": {
+            "de": day_start.isoformat(),
+            "ate": day_end.isoformat(),
+            "label": dia_str or (f"últimos {dias} dias" if dias else "hoje (Brasília)"),
+        },
+        "destinos_atuais": dict(destinos_total),
+        "por_vendedor": result,
+    })
+
+
 @app.route("/api/fechamentos-por-vendedor")
 def fechamentos_por_vendedor():
     """Negócios que ENTRARAM em FECHAMENTO no período. Agrupado por vendedor.

@@ -349,25 +349,28 @@
         </div>
       </header>
 
-      <!-- Fechamentos por vendedor -->
+      <!-- Passaram por FECHAMENTO (aproximação via lastMovedAt) -->
       <section class="panel">
         <header class="panel-header">
-          <h2>⚡ Fechamentos chegados <span id="relCountFech" class="count-badge">—</span></h2>
-          <span class="panel-sub">Negócios que entraram na etapa FECHAMENTO no período</span>
-          <select id="relFechHoras" class="select-produto" style="margin-left:auto; width:auto">
-            <option value="24">Últimas 24h</option>
-            <option value="72">Últimos 3 dias</option>
-            <option value="168" selected>Últimos 7 dias</option>
-            <option value="720">Últimos 30 dias</option>
-            <option value="9999">Tudo (desde 22/05)</option>
+          <h2>⚡ Passaram por FECHAMENTO <span id="relCountFech" class="count-badge">—</span></h2>
+          <span class="panel-sub">Quantos leads chegaram pra cada vendedor — incluindo os que já saíram</span>
+          <select id="relFechFiltro" class="select-produto" style="margin-left:auto; width:auto">
+            <option value="hoje" selected>Hoje</option>
+            <option value="ontem">Ontem</option>
+            <option value="7">Últimos 7 dias</option>
+            <option value="30">Últimos 30 dias</option>
+            <option value="data">Data específica…</option>
           </select>
+          <input type="date" id="relFechData" style="margin-left:8px; display:none; padding:7px 10px; border:1px solid var(--border-strong); border-radius:6px; font-family:inherit; font-size:13px">
         </header>
+
+        <div id="relFechDestinos" class="carteira-stats" style="margin-bottom: 16px"></div>
 
         <div id="relFechCards" class="vendedores-grid" style="margin-bottom: 20px"></div>
 
         <div id="relFechDetalhe">
           <div style="color:var(--text-dim); font-size:13px; padding:12px 0">
-            Clique num card pra ver os negócios em FECHAMENTO desse vendedor.
+            Clique num card pra ver os leads e pra onde foram (vendeu? desqualificou? ainda no funil?).
           </div>
         </div>
       </section>

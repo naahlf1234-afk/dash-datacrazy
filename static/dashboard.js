@@ -346,33 +346,72 @@ async function loadVendedoresGrid() {
   }
 }
 
-// ====== RELATÓRIO: FECHAMENTOS POR VENDEDOR ======
+// ====== RELATÓRIO: PASSARAM POR FECHAMENTO ======
 let _relFechCache = null;
 let _relFechVendedorAberto = null;
 
+const DESTINO_STYLES = {
+  "AGENDADO": { color: "#16a34a", bg: "#dcfce7", label: "✓ Vendeu", short: "vendeu" },
+  "FECHAMENTO": { color: "#f59e0b", bg: "#fef3c7", label: "● Ainda em fechamento", short: "no fech." },
+  "FOLLOW-UP": { color: "#fb923c", bg: "#ffedd5", label: "↻ Follow-up", short: "follow" },
+  "LEAD PRA O FUTURO": { color: "#a78bfa", bg: "#ede9fe", label: "⏳ Futuro", short: "futuro" },
+  "DESQUALIFICADO": { color: "#dc2626", bg: "#fee2e2", label: "✗ Desqualificou", short: "perdeu" },
+};
+
+function relFechQuery() {
+  const filtro = document.getElementById("relFechFiltro").value;
+  if (filtro === "hoje") return "";
+  if (filtro === "ontem") {
+    const y = new Date(); y.setDate(y.getDate() - 1);
+    return `?dia=${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,"0")}-${String(y.getDate()).padStart(2,"0")}`;
+  }
+  if (filtro === "data") {
+    const d = document.getElementById("relFechData").value;
+    return d ? `?dia=${d}` : "";
+  }
+  return `?dias=${filtro}`;
+}
+
 async function loadRelatorioFechamentos() {
-  const horas = document.getElementById("relFechHoras").value || 168;
   const cardsEl = document.getElementById("relFechCards");
   cardsEl.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim);padding:20px">Carregando…</div>`;
 
   try {
-    const data = await fetchJson(`/api/fechamentos-por-vendedor?horas=${horas}`);
+    const data = await fetchJson(`/api/passou-fechamento${relFechQuery()}`);
     _relFechCache = data;
     setCount("relCountFech", data.total);
 
+    // Resumo de destinos no topo
+    document.getElementById("relFechDestinos").innerHTML = Object.entries(data.destinos_atuais)
+      .sort(([,a],[,b]) => b - a)
+      .map(([stage, count]) => {
+        const s = DESTINO_STYLES[stage] || { bg: "#f1f5f9", color: "#475569" };
+        return `<span class="carteira-stat" style="background:${s.bg};color:${s.color};border-color:${s.color}33"><b>${count}</b> ${s.label || stage}</span>`;
+      }).join("");
+
+    // Cards por vendedor
     cardsEl.innerHTML = data.por_vendedor.map(v => {
       const iniciais = v.vendedor.name.split(" ").slice(0, 2).map(s => s[0]).join("").toUpperCase();
       const isExVendedor = v.vendedor.userId === "outros" || v.vendedor.userId === null;
-      const cardCls = isExVendedor ? "vendedor-card" : "vendedor-card";
+      const vendeu = v.destinos?.AGENDADO || 0;
+      const taxa = v.count > 0 ? Math.round(vendeu / v.count * 100) : 0;
       return `
-        <div class="${cardCls}" data-user="${v.vendedor.userId || 'sem'}">
+        <div class="vendedor-card" data-user="${v.vendedor.userId || 'sem'}">
           <div class="vendedor-avatar" style="${isExVendedor ? 'background: linear-gradient(135deg,#94a3b8,#64748b);' : ''}">${iniciais}</div>
           <div class="vendedor-nome">${v.vendedor.name}</div>
           <div class="vendedor-funcao">${isExVendedor ? '(legado)' : 'Vendedor ativo'}</div>
           <div class="vendedor-stats">
             <div class="vendedor-stat">
               <div class="vendedor-stat-value" style="color:#f59e0b">${v.count}</div>
-              <div class="vendedor-stat-label">Fechamentos</div>
+              <div class="vendedor-stat-label">Passaram</div>
+            </div>
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value" style="color:#16a34a">${vendeu}</div>
+              <div class="vendedor-stat-label">Venderam</div>
+            </div>
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value">${taxa}%</div>
+              <div class="vendedor-stat-label">Convers.</div>
             </div>
           </div>
         </div>
@@ -397,25 +436,28 @@ function mostrarFechamentosVendedor(userId) {
 
   const det = document.getElementById("relFechDetalhe");
   if (!bucket.negocios.length) {
-    det.innerHTML = `<div style="color:var(--text-dim);padding:12px 0">Sem fechamentos nesse período.</div>`;
+    det.innerHTML = `<div style="color:var(--text-dim);padding:12px 0">Sem leads nesse período.</div>`;
     return;
   }
   det.innerHTML = `
-    <h3 style="margin: 20px 0 12px; font-size:15px">📋 ${bucket.vendedor.name} — ${bucket.count} fechamento(s)</h3>
+    <h3 style="margin: 20px 0 12px; font-size:15px">📋 ${bucket.vendedor.name} — ${bucket.count} passaram por FECHAMENTO</h3>
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Lead</th><th>Código</th><th>Movido em</th><th>Há</th></tr>
+          <tr><th>Lead</th><th>Código</th><th>Destino atual</th><th>Movido em</th></tr>
         </thead>
         <tbody>
-          ${bucket.negocios.map(n => `
-            <tr>
-              <td><b>${n.leadName || "—"}</b></td>
-              <td>#${n.code}</td>
-              <td>${n.lastMovedAt ? new Date(n.lastMovedAt).toLocaleString("pt-BR") : "—"}</td>
-              <td class="num">${timeAgo(n.lastMovedAt)}</td>
-            </tr>
-          `).join("")}
+          ${bucket.negocios.map(n => {
+            const s = DESTINO_STYLES[n.destino_atual] || { color: "#475569", bg: "#f1f5f9" };
+            return `
+              <tr>
+                <td><b>${n.leadName || "—"}</b></td>
+                <td>#${n.code}</td>
+                <td><span class="tag-paid" style="background:${s.bg};color:${s.color}">${s.label || n.destino_atual}</span></td>
+                <td>${n.lastMovedAt ? new Date(n.lastMovedAt).toLocaleString("pt-BR") : "—"} <small style="color:var(--text-dim)">(${timeAgo(n.lastMovedAt)})</small></td>
+              </tr>
+            `;
+          }).join("")}
         </tbody>
       </table>
     </div>
@@ -546,7 +588,20 @@ document.getElementById("vdClose")?.addEventListener("click", () => {
   document.getElementById("vendedorDetail").style.display = "none";
 });
 
-document.getElementById("relFechHoras")?.addEventListener("change", loadRelatorioFechamentos);
+document.getElementById("relFechFiltro")?.addEventListener("change", e => {
+  const dataInput = document.getElementById("relFechData");
+  if (e.target.value === "data") {
+    dataInput.style.display = "inline-block";
+    if (!dataInput.value) {
+      const today = new Date();
+      dataInput.value = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+    }
+  } else {
+    dataInput.style.display = "none";
+    loadRelatorioFechamentos();
+  }
+});
+document.getElementById("relFechData")?.addEventListener("change", loadRelatorioFechamentos);
 
 // ====== CARTEIRA ======
 const CARTEIRA_RESUMO_LIMITE = 8;
