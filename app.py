@@ -87,12 +87,10 @@ def resumo():
     """Cards de topo: vendas, em fechamento (pre-venda humana), desqualificados, leads, conversas."""
     df, dt = _get_period()
     businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
-    # Leads: filtra pelo piso da operação. Se o MCP rejeitar o formato de data,
-    # cai pra leads totais (número um pouco inflado, mas funciona).
-    try:
-        leads_list = dc.leads(date_from=_effective_from(df).date().isoformat())
-    except Exception:
-        leads_list = dc.leads()
+    # Leads: não filtra por data (formato YYYY-MM-DD não é aceito pelo MCP e
+    # ISO completo é caro de paginar). total_leads conta a base inteira;
+    # taxa_conversao usa total_leads, então o % fica subestimado mas estável.
+    leads_list = dc.leads()
     convs = dc.conversations(status="opened")
 
     total_negocios = len(businesses)
