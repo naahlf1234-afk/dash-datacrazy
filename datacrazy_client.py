@@ -305,6 +305,11 @@ def add_product(business_id: str, product_id: str, quantity: int = 1, price: flo
     return _call_tool("business_add_product", args)
 
 
+def update_business_total(business_id: str, total: float) -> dict:
+    """Atualiza o campo total de um negócio. Não usa cache (ação de escrita)."""
+    return _call_tool("business_update_total", {"id": business_id, "total": total})
+
+
 def products() -> list[dict]:
     key = ("products",)
     cached = _cache.get(key)

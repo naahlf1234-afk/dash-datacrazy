@@ -346,6 +346,136 @@ async function loadVendedoresGrid() {
   }
 }
 
+// ====== REGISTROS: CORREÇÃO DE VALORES NO CRM ======
+let _regCorrecLista = [];
+
+async function detectarCorrecoes() {
+  const btn = document.getElementById("regBtnDetectar");
+  btn.disabled = true;
+  btn.textContent = "Analisando…";
+  document.getElementById("regCorrecInfo").style.display = "none";
+  document.getElementById("regCorrecResultado").style.display = "none";
+
+  try {
+    const data = await fetchJson("/api/correcoes/preview");
+    _regCorrecLista = data.lista;
+    setCount("regCountCorrec", data.total);
+
+    if (!data.total) {
+      document.getElementById("regCorrecInfo").style.display = "block";
+      document.getElementById("regCorrecInfo").innerHTML =
+        `<span style="color:#16a34a;font-weight:600">✓ Todos os valores já estão coerentes com os contratos.</span>`;
+      btn.textContent = "🔍 Detectar correções";
+      btn.disabled = false;
+      return;
+    }
+
+    document.getElementById("regCorrecStats").style.display = "flex";
+    const sinal = data.diferenca_total >= 0 ? "+" : "";
+    document.getElementById("regCorrecStats").innerHTML = `
+      <span class="carteira-stat">Total: <b>${data.total}</b> negócios</span>
+      <span class="carteira-stat ${data.diferenca_total >= 0 ? 'carteira-stat-venda' : 'carteira-stat-danger'}">
+        Ajuste líquido: <b>${sinal}${fmtBRL(data.diferenca_total)}</b>
+      </span>
+    `;
+
+    document.getElementById("regCorrecLista").style.display = "block";
+    renderCorrecoesTabela();
+  } catch (e) {
+    document.getElementById("regCorrecInfo").style.display = "block";
+    document.getElementById("regCorrecInfo").innerHTML =
+      `<span style="color:var(--danger)">Erro: ${e.message}</span>`;
+  }
+  btn.textContent = "🔍 Detectar correções";
+  btn.disabled = false;
+}
+
+function renderCorrecoesTabela() {
+  const tbody = document.querySelector("#regTableCorrec tbody");
+  tbody.innerHTML = _regCorrecLista.map((c, i) => {
+    const sinal = c.diferenca >= 0 ? "+" : "";
+    const corDif = c.diferenca >= 0 ? "#16a34a" : "#dc2626";
+    return `
+      <tr data-i="${i}">
+        <td><input type="checkbox" class="check-correc"></td>
+        <td><b>${c.leadName || "—"}</b><br><small style="color:var(--text-dim)">#${c.code}</small></td>
+        <td>${c.attendantName}</td>
+        <td class="num">${fmtBRL(c.valor_atual)}</td>
+        <td class="num"><b>${fmtBRL(c.valor_contrato)}</b></td>
+        <td class="num" style="color:${corDif};font-weight:700">${sinal}${fmtBRL(c.diferenca)}</td>
+        <td>${c.plano_meses ? c.plano_meses + " meses" : "—"}</td>
+      </tr>
+    `;
+  }).join("");
+
+  tbody.querySelectorAll(".check-correc").forEach((cb, i) => {
+    cb.addEventListener("change", atualizaCountAplicarCorrec);
+  });
+  atualizaCountAplicarCorrec();
+}
+
+function atualizaCountAplicarCorrec() {
+  const checked = document.querySelectorAll(".check-correc:checked").length;
+  document.getElementById("regCountAplicar").textContent = checked;
+  document.getElementById("regBtnAplicar").disabled = checked === 0;
+}
+
+async function aplicarCorrecoes() {
+  const aplicacoes = [];
+  document.querySelectorAll("#regTableCorrec tbody tr").forEach(tr => {
+    const cb = tr.querySelector(".check-correc");
+    if (!cb.checked) return;
+    const i = +tr.dataset.i;
+    const c = _regCorrecLista[i];
+    aplicacoes.push({ businessId: c.businessId, valor: c.valor_contrato });
+  });
+
+  if (!aplicacoes.length) return;
+  if (!confirm(`Aplicar correção em ${aplicacoes.length} negócio(s)?\n\nO valor no CRM será sobrescrito pelo valor do contrato.\nEssa ação NÃO pode ser desfeita automaticamente.`)) return;
+
+  const btn = document.getElementById("regBtnAplicar");
+  btn.disabled = true;
+  btn.textContent = `Aplicando ${aplicacoes.length}…`;
+
+  try {
+    const res = await fetch("/api/correcoes/aplicar", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ aplicacoes }),
+    });
+    const data = await res.json();
+
+    const resEl = document.getElementById("regCorrecResultado");
+    resEl.style.display = "block";
+    resEl.innerHTML = `
+      <div class="carteira-stats">
+        <span class="carteira-stat carteira-stat-venda">Sucesso: <b>${data.sucesso}</b></span>
+        ${(data.total - data.sucesso) > 0 ? `<span class="carteira-stat carteira-stat-danger">Falhas: <b>${data.total - data.sucesso}</b></span>` : ""}
+      </div>
+      ${data.resultados.filter(r => !r.ok).slice(0, 10).map(r =>
+        `<small style="color:var(--danger);display:block">erro em ${r.businessId}: ${r.erro || "?"}</small>`
+      ).join("")}
+      <div style="margin-top:14px">
+        <button class="btn btn-ghost" onclick="detectarCorrecoes()">Re-detectar</button>
+      </div>
+    `;
+    btn.textContent = "Aplicado ✓";
+    // recarrega o dashboard pra atualizar os cards de faturamento
+    setTimeout(() => loadAll(), 1500);
+  } catch (e) {
+    alert(`Erro ao aplicar: ${e.message}`);
+    btn.textContent = "Aplicar selecionadas";
+    btn.disabled = false;
+  }
+}
+
+document.getElementById("regBtnDetectar")?.addEventListener("click", detectarCorrecoes);
+document.getElementById("regBtnAplicar")?.addEventListener("click", aplicarCorrecoes);
+document.getElementById("regCheckAll")?.addEventListener("change", e => {
+  document.querySelectorAll(".check-correc").forEach(cb => cb.checked = e.target.checked);
+  atualizaCountAplicarCorrec();
+});
+
 // ====== RELATÓRIO: PASSARAM POR FECHAMENTO ======
 let _relFechCache = null;
 let _relFechVendedorAberto = null;

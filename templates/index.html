@@ -476,21 +476,58 @@
       <header class="page-header">
         <div>
           <h1>Registros</h1>
-          <p class="subtitle">Histórico diário · snapshots e comparativos</p>
+          <p class="subtitle">Sincronização CRM · ações de manutenção</p>
         </div>
       </header>
 
-      <div class="placeholder-panel">
-        <div class="placeholder-icon">📋</div>
-        <h3>Em construção (Fase 4)</h3>
-        <p>Aqui virá o histórico acumulado pelo snapshot noturno:</p>
+      <section class="panel">
+        <header class="panel-header">
+          <h2>💰 Corrigir valores no datacrazy <span id="regCountCorrec" class="count-badge">—</span></h2>
+          <span class="panel-sub">Compara <code>business.total</code> com o valor extraído do contrato — você decide quais aplicar</span>
+          <button id="regBtnDetectar" class="btn btn-primary" style="margin-left:auto">🔍 Detectar correções</button>
+        </header>
+
+        <div id="regCorrecInfo" style="color:var(--text-dim);font-size:13px;padding:12px 0">
+          Clique em "Detectar correções" pra ver quais negócios tem valor desalinhado.
+        </div>
+
+        <div id="regCorrecStats" class="carteira-stats" style="display:none"></div>
+
+        <div id="regCorrecLista" style="display:none">
+          <div class="table-wrap">
+            <table id="regTableCorrec">
+              <thead>
+                <tr>
+                  <th><input type="checkbox" id="regCheckAll" title="Selecionar/desmarcar tudo"></th>
+                  <th>Lead</th>
+                  <th>Vendedor</th>
+                  <th>Valor atual</th>
+                  <th>Valor do contrato</th>
+                  <th>Diferença</th>
+                  <th>Plano</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="carteira-expand-wrap">
+            <button id="regBtnAplicar" class="btn btn-primary" disabled>Aplicar selecionadas (<span id="regCountAplicar">0</span>)</button>
+          </div>
+        </div>
+
+        <div id="regCorrecResultado" style="display:none; margin-top:18px"></div>
+      </section>
+
+      <div class="placeholder-panel" style="margin-top: 24px">
+        <div class="placeholder-icon">📊</div>
+        <h3>Histórico noturno em construção</h3>
+        <p>Ainda virá nesta aba:</p>
         <ul>
           <li>Vendas dia-a-dia (gráfico de barras)</li>
-          <li>Comparativo semana vs semana</li>
-          <li>Comparativo mês vs mês</li>
+          <li>Comparativo semana vs semana / mês vs mês</li>
           <li>Exportar relatório em PDF / Excel</li>
         </ul>
-        <p class="placeholder-hint">Começa a popular automaticamente depois que o snapshot rodar pela primeira vez.</p>
+        <p class="placeholder-hint">O monitor de FECHAMENTO já tá rodando — em alguns dias dá pra ativar essa parte.</p>
       </div>
     </section>
   </main>

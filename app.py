@@ -564,6 +564,77 @@ def vendedor_detail(user_id: str):
     })
 
 
+@app.route("/api/correcoes/preview")
+def correcoes_preview():
+    """Lista negócios cujo business.total NÃO bate com o valor do contrato extraído.
+    Só AGENDADOS com contrato com valor."""
+    all_data = _get_all_contracts_cached()
+    correcoes = []
+    for d in all_data:
+        ct = d.get("contract") or {}
+        valor_contrato = ct.get("valor")
+        if not valor_contrato:
+            continue
+        valor_atual = d.get("business_total") or 0
+        if abs(valor_atual - valor_contrato) < 0.01:
+            continue  # já bate
+        correcoes.append({
+            "businessId": d.get("businessId"),
+            "code": d.get("code"),
+            "leadName": ct.get("nome_completo") or d.get("leadName"),
+            "attendantName": d.get("attendantName"),
+            "valor_atual": valor_atual,
+            "valor_contrato": valor_contrato,
+            "diferenca": valor_contrato - valor_atual,
+            "plano_meses": ct.get("plano_meses"),
+            "pagamento": ct.get("pagamento"),
+        })
+    correcoes.sort(key=lambda x: abs(x["diferenca"]), reverse=True)
+    total_diferenca = sum(c["diferenca"] for c in correcoes)
+    return jsonify({
+        "total": len(correcoes),
+        "diferenca_total": round(total_diferenca, 2),
+        "lista": correcoes,
+    })
+
+
+@app.route("/api/correcoes/aplicar", methods=["POST"])
+def correcoes_aplicar():
+    """Aplica em lote business_update_total. Body: { aplicacoes: [{businessId, valor}] }"""
+    payload = request.get_json(silent=True) or {}
+    aplicacoes = payload.get("aplicacoes") or []
+
+    resultados = []
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        futures: dict[Any, str] = {}
+        for ap in aplicacoes:
+            bid = ap.get("businessId")
+            valor = ap.get("valor")
+            if not bid or not valor:
+                resultados.append({"businessId": bid, "ok": False, "erro": "campos obrigatórios"})
+                continue
+            futures[pool.submit(dc.update_business_total, bid, float(valor))] = bid
+
+        for fut in as_completed(futures):
+            bid = futures[fut]
+            try:
+                fut.result()
+                resultados.append({"businessId": bid, "ok": True})
+            except Exception as e:
+                resultados.append({"businessId": bid, "ok": False, "erro": str(e)[:200]})
+
+    # invalida caches pra próximo /api/contratos refletir
+    dc.clear_cache()
+    with _contracts_cache_lock:
+        _contracts_cache["ts"] = 0
+
+    return jsonify({
+        "resultados": resultados,
+        "total": len(resultados),
+        "sucesso": sum(1 for r in resultados if r["ok"]),
+    })
+
+
 @app.route("/api/sem-contrato")
 def sem_contrato():
     """Vendas AGENDADAS que NÃO têm contrato enviado na conversa do CRM.
