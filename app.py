@@ -231,6 +231,70 @@ def contratos():
     })
 
 
+@app.route("/api/fechamentos-por-vendedor")
+def fechamentos_por_vendedor():
+    """Negócios que ENTRARAM em FECHAMENTO no período. Agrupado por vendedor.
+    Filtro: ?horas=N (default 168 = 7 dias)."""
+    horas = int(request.args.get("horas", 168))
+    stage_id = next(s["id"] for s in dc.STAGES_API if s["name"] == "FECHAMENTO")
+    todos = dc.businesses_by_stage(stage_id)
+    cutoff_ts = _now_utc().timestamp() - horas * 3600
+
+    filtrados = []
+    for b in todos:
+        moved = _parse_iso(b.get("lastMovedAt"))
+        if not moved:
+            continue
+        if moved.timestamp() < cutoff_ts:
+            continue
+        if moved < OPERATION_START_DATE:
+            continue
+        filtrados.append(b)
+
+    att_to_user = dc.attendant_id_to_user_id()
+
+    by_user: dict[str, dict] = {
+        v["userId"]: {"vendedor": v, "count": 0, "negocios": []}
+        for v in dc.VENDEDORES
+    }
+    sem_dono = {"vendedor": {"userId": None, "name": "Sem atendente"}, "count": 0, "negocios": []}
+    outros = {"vendedor": {"userId": "outros", "name": "Outros (ex-vendedores)"}, "count": 0, "negocios": []}
+
+    for b in filtrados:
+        att_id = b.get("attendantId")
+        if not att_id:
+            bucket = sem_dono
+        else:
+            user_id = att_to_user.get(att_id)
+            bucket = by_user.get(user_id, outros) if user_id else outros
+        bucket["count"] += 1
+        bucket["negocios"].append({
+            "code": b.get("code"),
+            "leadId": b.get("leadId"),
+            "leadName": b.get("leadName"),
+            "attendantName": (b.get("attendantName") or "—").strip(),
+            "lastMovedAt": b.get("lastMovedAt"),
+        })
+
+    # ordena negócios dentro de cada bucket
+    for bucket in list(by_user.values()) + [sem_dono, outros]:
+        bucket["negocios"].sort(key=lambda x: x.get("lastMovedAt") or "", reverse=True)
+
+    # mostra todos os ativos mesmo com 0; outros/sem-dono só se >0
+    result = list(by_user.values())
+    if outros["count"] > 0:
+        result.append(outros)
+    if sem_dono["count"] > 0:
+        result.append(sem_dono)
+    result.sort(key=lambda x: x["count"], reverse=True)
+
+    return jsonify({
+        "total": sum(b["count"] for b in result),
+        "horas": horas,
+        "por_vendedor": result,
+    })
+
+
 @app.route("/api/vendedor/<user_id>")
 def vendedor_detail(user_id: str):
     """Ficha individual: stats, vendas do dia (com nome real do contrato),

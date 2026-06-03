@@ -111,8 +111,9 @@ function setupTabs() {
       document.querySelectorAll(".tab-content").forEach(tab => {
         tab.classList.toggle("active", tab.dataset.tabContent === target);
       });
-      // Carrega Vendedores lazy quando a aba abre
+      // Carrega Vendedores e Relatórios lazy quando suas abas abrem
       if (target === "vendedores") loadVendedoresGrid();
+      if (target === "relatorios") loadRelatorioFechamentos();
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
@@ -345,6 +346,82 @@ async function loadVendedoresGrid() {
   }
 }
 
+// ====== RELATÓRIO: FECHAMENTOS POR VENDEDOR ======
+let _relFechCache = null;
+let _relFechVendedorAberto = null;
+
+async function loadRelatorioFechamentos() {
+  const horas = document.getElementById("relFechHoras").value || 168;
+  const cardsEl = document.getElementById("relFechCards");
+  cardsEl.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim);padding:20px">Carregando…</div>`;
+
+  try {
+    const data = await fetchJson(`/api/fechamentos-por-vendedor?horas=${horas}`);
+    _relFechCache = data;
+    setCount("relCountFech", data.total);
+
+    cardsEl.innerHTML = data.por_vendedor.map(v => {
+      const iniciais = v.vendedor.name.split(" ").slice(0, 2).map(s => s[0]).join("").toUpperCase();
+      const isExVendedor = v.vendedor.userId === "outros" || v.vendedor.userId === null;
+      const cardCls = isExVendedor ? "vendedor-card" : "vendedor-card";
+      return `
+        <div class="${cardCls}" data-user="${v.vendedor.userId || 'sem'}">
+          <div class="vendedor-avatar" style="${isExVendedor ? 'background: linear-gradient(135deg,#94a3b8,#64748b);' : ''}">${iniciais}</div>
+          <div class="vendedor-nome">${v.vendedor.name}</div>
+          <div class="vendedor-funcao">${isExVendedor ? '(legado)' : 'Vendedor ativo'}</div>
+          <div class="vendedor-stats">
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value" style="color:#f59e0b">${v.count}</div>
+              <div class="vendedor-stat-label">Fechamentos</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    cardsEl.querySelectorAll(".vendedor-card").forEach(card => {
+      card.addEventListener("click", () => mostrarFechamentosVendedor(card.dataset.user));
+    });
+
+    if (_relFechVendedorAberto) mostrarFechamentosVendedor(_relFechVendedorAberto);
+  } catch (e) {
+    cardsEl.innerHTML = `<div style="grid-column:1/-1;color:var(--danger);padding:20px">Erro: ${e.message}</div>`;
+  }
+}
+
+function mostrarFechamentosVendedor(userId) {
+  _relFechVendedorAberto = userId;
+  if (!_relFechCache) return;
+  const bucket = _relFechCache.por_vendedor.find(v => (v.vendedor.userId || "sem") === userId);
+  if (!bucket) return;
+
+  const det = document.getElementById("relFechDetalhe");
+  if (!bucket.negocios.length) {
+    det.innerHTML = `<div style="color:var(--text-dim);padding:12px 0">Sem fechamentos nesse período.</div>`;
+    return;
+  }
+  det.innerHTML = `
+    <h3 style="margin: 20px 0 12px; font-size:15px">📋 ${bucket.vendedor.name} — ${bucket.count} fechamento(s)</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Lead</th><th>Código</th><th>Movido em</th><th>Há</th></tr>
+        </thead>
+        <tbody>
+          ${bucket.negocios.map(n => `
+            <tr>
+              <td><b>${n.leadName || "—"}</b></td>
+              <td>#${n.code}</td>
+              <td>${n.lastMovedAt ? new Date(n.lastMovedAt).toLocaleString("pt-BR") : "—"}</td>
+              <td class="num">${timeAgo(n.lastMovedAt)}</td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 // ====== FICHA INDIVIDUAL DO VENDEDOR ======
 let _vdChart = null;
 
@@ -468,6 +545,8 @@ async function loadVendedorDetail(userId, nome) {
 document.getElementById("vdClose")?.addEventListener("click", () => {
   document.getElementById("vendedorDetail").style.display = "none";
 });
+
+document.getElementById("relFechHoras")?.addEventListener("change", loadRelatorioFechamentos);
 
 // ====== CARTEIRA ======
 const CARTEIRA_RESUMO_LIMITE = 8;
