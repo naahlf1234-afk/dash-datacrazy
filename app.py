@@ -87,8 +87,12 @@ def resumo():
     """Cards de topo: vendas, em fechamento (pre-venda humana), desqualificados, leads, conversas."""
     df, dt = _get_period()
     businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
-    # Leads também filtrados pelo piso da operação (22/05/2026)
-    leads_list = dc.leads(date_from=_effective_from(df).isoformat())
+    # Leads: filtra pelo piso da operação. Se o MCP rejeitar o formato de data,
+    # cai pra leads totais (número um pouco inflado, mas funciona).
+    try:
+        leads_list = dc.leads(date_from=_effective_from(df).date().isoformat())
+    except Exception:
+        leads_list = dc.leads()
     convs = dc.conversations(status="opened")
 
     total_negocios = len(businesses)
