@@ -13,10 +13,49 @@ const STAGE_COLORS = {
 
 let chartFunil = null;
 let chartConversas = null;
+let currentMode = "otimista";  // otimista | realista
+let currentPreset = "hoje";    // hoje | ontem | semana | mes | mes-atual | tudo | custom
 
 function setStatus(msg, level = "info") {
+  if (!STATUS) return;
   STATUS.textContent = msg;
   STATUS.style.color = level === "err" ? "var(--danger)" : "var(--text-dim)";
+}
+
+function fmtBRL(n) {
+  if (n === null || n === undefined || isNaN(n)) return "R$ 0";
+  return Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+}
+
+function fmtPct(n) {
+  if (n === null || n === undefined || isNaN(n)) return "0.0%";
+  return `${Number(n).toFixed(1)}%`;
+}
+
+// ====== DATAS / PRESETS ======
+function presetToDates(preset) {
+  const now = new Date();
+  const startOfDay = d => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const endOfDay = d => { const x = new Date(d); x.setHours(23, 59, 59, 999); return x; };
+
+  if (preset === "hoje") return { from: startOfDay(now), to: endOfDay(now), label: `Hoje · ${now.toLocaleDateString("pt-BR", {day: "2-digit", month: "2-digit"})}` };
+  if (preset === "ontem") {
+    const y = new Date(now); y.setDate(y.getDate() - 1);
+    return { from: startOfDay(y), to: endOfDay(y), label: `Ontem · ${y.toLocaleDateString("pt-BR", {day: "2-digit", month: "2-digit"})}` };
+  }
+  if (preset === "semana") {
+    const f = new Date(now); f.setDate(f.getDate() - 6);
+    return { from: startOfDay(f), to: endOfDay(now), label: "Últimos 7 dias" };
+  }
+  if (preset === "mes") {
+    const f = new Date(now); f.setDate(f.getDate() - 29);
+    return { from: startOfDay(f), to: endOfDay(now), label: "Últimos 30 dias" };
+  }
+  if (preset === "mes-atual") {
+    const f = new Date(now.getFullYear(), now.getMonth(), 1);
+    return { from: startOfDay(f), to: endOfDay(now), label: `Este mês · ${now.toLocaleDateString("pt-BR", {month: "long"})}` };
+  }
+  return { from: null, to: null, label: "Todo o histórico" };
 }
 
 function periodParams() {
@@ -28,6 +67,76 @@ function periodParams() {
   return params.toString();
 }
 
+function applyPreset(preset) {
+  currentPreset = preset;
+  const { from, to, label } = presetToDates(preset);
+  const lblEl = document.getElementById("datePreset");
+  if (lblEl) lblEl.innerHTML = label;
+  const fromInput = document.getElementById("dateFrom");
+  const toInput = document.getElementById("dateTo");
+  if (from && to) {
+    // datetime-local quer YYYY-MM-DDTHH:mm sem segundos
+    const toLocal = d => {
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    fromInput.value = toLocal(from);
+    toInput.value = toLocal(to);
+  } else {
+    fromInput.value = "";
+    toInput.value = "";
+  }
+  closeDateDropdown();
+  loadAll();
+}
+
+function openDateDropdown() {
+  document.getElementById("dateDropdownMenu").classList.add("open");
+}
+function closeDateDropdown() {
+  document.getElementById("dateDropdownMenu").classList.remove("open");
+}
+function toggleDateDropdown() {
+  document.getElementById("dateDropdownMenu").classList.toggle("open");
+}
+
+// ====== TABS DA SIDEBAR ======
+function setupTabs() {
+  document.querySelectorAll(".nav-item[data-tab]").forEach(item => {
+    item.addEventListener("click", e => {
+      e.preventDefault();
+      const target = item.dataset.tab;
+      document.querySelectorAll(".nav-item").forEach(n => n.classList.remove("active"));
+      item.classList.add("active");
+      document.querySelectorAll(".tab-content").forEach(tab => {
+        tab.classList.toggle("active", tab.dataset.tabContent === target);
+      });
+      // Carrega Vendedores lazy quando a aba abre
+      if (target === "vendedores") loadVendedoresGrid();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+  });
+}
+
+// ====== MODE TABS (OTIMISTA / REALISTA) ======
+function setupModeTabs() {
+  document.querySelectorAll(".mode-tab").forEach(btn => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".mode-tab").forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentMode = btn.dataset.mode;
+      const ind = document.querySelector(".mode-indicator");
+      ind.className = "mode-indicator mode-" + currentMode;
+      const lbl = document.getElementById("modeLabel");
+      lbl.textContent = currentMode === "otimista"
+        ? "Otimista — Confirmadas + Reservas/Futuros"
+        : "Realista — Só vendas confirmadas (AGENDADO)";
+      loadMetricas();
+    });
+  });
+}
+
+// ====== FETCH ======
 async function fetchJson(path) {
   const q = periodParams();
   const url = q ? `${path}${path.includes("?") ? "&" : "?"}${q}` : path;
@@ -36,31 +145,58 @@ async function fetchJson(path) {
   return res.json();
 }
 
-async function loadResumo() {
-  const data = await fetchJson("/api/resumo");
-  const cards = [
-    { label: "Vendas (Agendados)", value: data.vendas, highlight: true },
-    { label: "Taxa de conversão", value: `${data.taxa_conversao}%` },
-    { label: "Em fechamento", value: data.em_fechamento, hint: "aguardando confirmação humana" },
-    { label: "Negócios no funil", value: data.total_negocios },
-    { label: "Desqualificados", value: data.desqualificados, danger: true },
-    { label: "Leads na base", value: data.total_leads.toLocaleString("pt-BR") },
-    { label: "Conversas abertas", value: data.conversas_abertas },
-  ];
-  document.getElementById("cards").innerHTML = cards
-    .map(c => {
-      const cls = c.highlight ? "card highlight" : c.danger ? "card danger" : "card";
-      const hint = c.hint ? `<div class="hint">${c.hint}</div>` : "";
-      return `<div class="${cls}"><div class="label">${c.label}</div><div class="value">${c.value}</div>${hint}</div>`;
-    })
-    .join("");
-}
-
 function setCount(id, n) {
   const el = document.getElementById(id);
   if (el) el.textContent = n;
 }
 
+// ====== 8 CARDS DE MÉTRICAS ======
+async function loadMetricas() {
+  try {
+    const [resumo, ranking] = await Promise.all([
+      fetchJson("/api/resumo"),
+      fetchJson("/api/ranking"),
+    ]);
+
+    // Otimista: vendas (AGENDADO) + em_fechamento como "futuros"
+    // Realista: só AGENDADO
+    const vendasConfirm = resumo.vendas;
+    const futuros = resumo.em_fechamento;
+    const totalVendas = currentMode === "otimista" ? vendasConfirm + futuros : vendasConfirm;
+
+    document.getElementById("mLeads").textContent = resumo.total_leads.toLocaleString("pt-BR");
+    document.getElementById("mLeadsHint").textContent = `${ranking.filter(r => r.userId && r.userId !== "outros").length} vendedores`;
+
+    document.getElementById("mVendas").textContent = totalVendas;
+    document.getElementById("mVendasHint").textContent =
+      `${vendasConfirm} confirm. · ${futuros} futuros`;
+
+    document.getElementById("mFuturos").textContent = futuros;
+
+    const taxaConv = resumo.total_leads ? (totalVendas / resumo.total_leads * 100) : 0;
+    document.getElementById("mConversao").textContent = fmtPct(taxaConv);
+
+    // FATURAMENTO / TICKET: por enquanto baseado em business.total quando preenchido
+    // (na Fase 2 trocamos pelo valor extraído do contrato)
+    const fatRes = await fetch("/api/faturamento").catch(() => null);
+    if (fatRes && fatRes.ok) {
+      const fat = await fatRes.json();
+      document.getElementById("mFaturamento").textContent = fmtBRL(fat.faturamento);
+      document.getElementById("mTicket").textContent = fmtBRL(fat.ticket_medio);
+      document.getElementById("mSeisMeses").textContent = fmtPct(fat.pct_6_meses);
+      document.getElementById("mAntecipadas").textContent = fmtPct(fat.pct_antecipadas);
+    } else {
+      document.getElementById("mFaturamento").textContent = "—";
+      document.getElementById("mTicket").textContent = "—";
+      document.getElementById("mSeisMeses").textContent = "—";
+      document.getElementById("mAntecipadas").textContent = "—";
+    }
+  } catch (e) {
+    console.error("loadMetricas:", e);
+  }
+}
+
+// ====== FUNIL ======
 async function loadFunil() {
   const data = await fetchJson("/api/funil");
   setCount("countFunil", data.reduce((s, d) => s + d.count, 0));
@@ -90,6 +226,7 @@ async function loadFunil() {
   });
 }
 
+// ====== RANKING ======
 async function loadRanking() {
   const data = await fetchJson("/api/ranking");
   setCount("countRanking", data.length);
@@ -112,6 +249,7 @@ async function loadRanking() {
   });
 }
 
+// ====== CONVERSAS ======
 async function loadConversas() {
   const data = await fetchJson("/api/conversas");
   setCount("countConversas", data.total_abertas + data.total_aguardando);
@@ -127,7 +265,7 @@ async function loadConversas() {
       datasets: [{
         label: "Conversas",
         data: values,
-        backgroundColor: "#4f8cf2",
+        backgroundColor: "#22c55e",
         borderRadius: 4,
       }],
     },
@@ -150,6 +288,53 @@ async function loadConversas() {
   `;
 }
 
+// ====== VENDEDORES (GRID DA ABA) ======
+async function loadVendedoresGrid() {
+  const grid = document.getElementById("vendedoresGrid");
+  if (!grid) return;
+  if (grid.dataset.loaded === "1") return;  // só carrega uma vez por sessão
+  try {
+    const ranking = await fetchJson("/api/ranking");
+    const vendedores = ranking.filter(r => r.userId && r.userId !== "outros");
+    grid.innerHTML = vendedores.map(v => {
+      const iniciais = v.name.split(" ").slice(0, 2).map(s => s[0]).join("").toUpperCase();
+      return `
+        <div class="vendedor-card" data-user="${v.userId}" data-name="${v.name}">
+          <div class="vendedor-avatar">${iniciais}</div>
+          <div class="vendedor-nome">${v.name}</div>
+          <div class="vendedor-funcao">Vendedor · Pipeline API</div>
+          <div class="vendedor-stats">
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value">${v.vendas}</div>
+              <div class="vendedor-stat-label">Vendas</div>
+            </div>
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value">${v.em_fechamento}</div>
+              <div class="vendedor-stat-label">Fechamento</div>
+            </div>
+            <div class="vendedor-stat">
+              <div class="vendedor-stat-value">${v.taxa_conversao}%</div>
+              <div class="vendedor-stat-label">Conv.</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    grid.querySelectorAll(".vendedor-card").forEach(card => {
+      card.addEventListener("click", () => {
+        // Por enquanto, troca pra tab Dashboard e abre a carteira
+        document.querySelector('.nav-item[data-tab="dashboard"]').click();
+        setTimeout(() => loadCarteira(card.dataset.user, card.dataset.name), 200);
+      });
+    });
+    grid.dataset.loaded = "1";
+  } catch (e) {
+    grid.innerHTML = `<div class="placeholder-panel"><p>Erro ao carregar vendedores: ${e.message}</p></div>`;
+  }
+}
+
+// ====== CARTEIRA ======
 const CARTEIRA_RESUMO_LIMITE = 8;
 let carteiraFull = [];
 let semProdutoFull = [];
@@ -233,11 +418,8 @@ async function loadCarteira(userId, nome) {
   document.getElementById("carteiraPanel").style.display = "block";
   setCount("countCarteira", data.length);
 
-  // estatísticas por estágio
   const porEstagio = {};
-  for (const b of data) {
-    porEstagio[b.stageName] = (porEstagio[b.stageName] || 0) + 1;
-  }
+  for (const b of data) porEstagio[b.stageName] = (porEstagio[b.stageName] || 0) + 1;
   const stats = [
     { stage: "AGENDADO", label: "Vendas", cls: "carteira-stat-venda" },
     { stage: "FECHAMENTO", label: "Fechamento" },
@@ -245,14 +427,12 @@ async function loadCarteira(userId, nome) {
     { stage: "GERAÇÃO DE VALOR", label: "Geração de valor" },
     { stage: "SONDAGEM", label: "Sondagem" },
     { stage: "APRESENTAÇÃO", label: "Apresentação" },
-    { stage: "AGENDADO", label: "" },  // skip duplicate, handled
     { stage: "FOLLOW-UP", label: "Follow-up" },
     { stage: "LEAD PRA O FUTURO", label: "Futuro" },
     { stage: "DESQUALIFICADO", label: "Desqualificados", cls: "carteira-stat-danger" },
   ];
-  const seen = new Set();
   document.getElementById("carteiraStats").innerHTML = stats
-    .filter(s => s.label && porEstagio[s.stage] && !seen.has(s.stage) && seen.add(s.stage))
+    .filter(s => s.label && porEstagio[s.stage])
     .map(s => `<span class="carteira-stat ${s.cls || ''}">${s.label}: <b>${porEstagio[s.stage]}</b></span>`)
     .join("");
 
@@ -261,6 +441,7 @@ async function loadCarteira(userId, nome) {
   document.getElementById("carteiraPanel").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+// ====== UTIL ======
 function timeAgo(iso) {
   if (!iso) return "—";
   const ms = Date.now() - new Date(iso).getTime();
@@ -275,10 +456,10 @@ function timeAgo(iso) {
 
 function sanitizePreview(text) {
   if (!text) return "—";
-  // remove caracteres invisíveis de zero-width que aparecem em mensagens
   return text.replace(/[​-‍﻿]/g, "").trim() || "(mensagem invisível)";
 }
 
+// ====== LEADS QUENTES ======
 async function loadQuentes() {
   const loading = document.getElementById("loadingQuentes");
   const table = document.getElementById("tableQuentes");
@@ -315,6 +496,7 @@ async function loadQuentes() {
   }).join("");
 }
 
+// ====== FECHAMENTO ======
 async function loadFechamento() {
   const horas = document.getElementById("horasFechamento").value || 24;
   const res = await fetch(`/api/leads-fechamento?horas=${horas}`);
@@ -341,6 +523,42 @@ async function loadFechamento() {
   }).join("");
 }
 
+// ====== SEM CONTRATO (alerta) ======
+async function loadSemContrato() {
+  try {
+    const data = await fetchJson("/api/sem-contrato");
+    const sec = document.getElementById("alertSemContrato");
+    if (!sec) return;
+    if (!data.total_sem_contrato) {
+      sec.style.display = "none";
+      return;
+    }
+    sec.style.display = "block";
+    setCount("countSemContrato", data.total_sem_contrato);
+    const pct = data.total_no_periodo ? Math.round(data.total_sem_contrato * 100 / data.total_no_periodo) : 0;
+    document.getElementById("semContratoSub").innerHTML =
+      `<b>${data.total_sem_contrato}</b> de <b>${data.total_no_periodo}</b> agendados (${pct}%) sem declaração de compra na conversa`;
+
+    document.getElementById("semContratoPorVendedor").innerHTML = data.por_vendedor
+      .map(v => `<span class="carteira-stat carteira-stat-danger">${v.vendedor}: <b>${v.count}</b></span>`)
+      .join("");
+
+    const tbody = document.querySelector("#tableSemContrato tbody");
+    tbody.innerHTML = data.lista.map(d => `
+      <tr>
+        <td><b>${d.leadName || "—"}</b><br><small style="color:var(--text-dim)">#${d.code}</small></td>
+        <td>${d.attendantName}</td>
+        <td>${d.lastMovedAt ? new Date(d.lastMovedAt).toLocaleString("pt-BR") : "—"}</td>
+        <td class="num dias-aviso">${timeAgo(d.lastMovedAt)}</td>
+        <td><a class="link-btn" href="https://app.datacrazy.io/conversation/${d.leadId}" target="_blank">abrir conversa →</a></td>
+      </tr>
+    `).join("");
+  } catch (e) {
+    console.error("loadSemContrato:", e);
+  }
+}
+
+// ====== GOLDEN ======
 async function loadGoldenBadge() {
   const res = await fetch("/api/golden-time");
   const data = await res.json();
@@ -349,58 +567,49 @@ async function loadGoldenBadge() {
   el.className = "golden-badge " + (data.is_peak ? "peak" : data.is_golden ? "golden" : "off");
 }
 
+// ====== LOAD ALL ======
 async function loadAll() {
   setStatus("carregando dados...");
   try {
-    await Promise.all([loadResumo(), loadFunil(), loadRanking(), loadConversas(), loadFechamento(), loadQuentes(), loadGoldenBadge(), loadSemProduto()]);
-    const ts = new Date().toLocaleString("pt-BR");
+    await Promise.all([
+      loadMetricas(),
+      loadFunil(),
+      loadRanking(),
+      loadConversas(),
+      loadFechamento(),
+      loadQuentes(),
+      loadGoldenBadge(),
+      loadSemProduto(),
+      loadSemContrato(),
+    ]);
+    const ts = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
     setStatus(`última atualização: ${ts}`);
+    const syncTime = document.getElementById("syncTime");
+    if (syncTime) syncTime.textContent = ts;
     const syncFooter = document.getElementById("syncFooter");
-    if (syncFooter) syncFooter.textContent = `sync: ${new Date().toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"})}`;
+    if (syncFooter) syncFooter.textContent = `sync: ${ts}`;
+    // Vendedores grid recarrega se a aba já tiver sido visitada
+    const grid = document.getElementById("vendedoresGrid");
+    if (grid && grid.dataset.loaded === "1") { grid.dataset.loaded = "0"; loadVendedoresGrid(); }
   } catch (e) {
     setStatus(`erro: ${e.message}`, "err");
     console.error(e);
   }
 }
 
-document.getElementById("btnApply").addEventListener("click", loadAll);
-document.getElementById("btnClear").addEventListener("click", () => {
-  document.getElementById("dateFrom").value = "";
-  document.getElementById("dateTo").value = "";
-  loadAll();
-});
-document.getElementById("btnRefresh").addEventListener("click", async () => {
-  setStatus("limpando cache e recarregando...");
-  await fetch("/api/refresh", { method: "POST" });
-  loadAll();
-});
-document.getElementById("horasQuentes").addEventListener("change", loadQuentes);
-document.getElementById("horasFechamento").addEventListener("change", loadFechamento);
-document.getElementById("closeCart").addEventListener("click", () => {
-  document.getElementById("carteiraPanel").style.display = "none";
-});
-document.getElementById("btnExpandCarteira").addEventListener("click", () => {
-  const btn = document.getElementById("btnExpandCarteira");
-  renderCarteira(btn.dataset.expanded !== "1");
-});
-document.getElementById("btnExpandSemProduto").addEventListener("click", () => {
-  const btn = document.getElementById("btnExpandSemProduto");
-  renderSemProduto(btn.dataset.expanded !== "1");
-});
-
 // ====== DETEC PRODUTO ======
-let detecProdutos = [];   // [{id,name,price}]
-let detecLista = [];      // mutável: usuário pode mudar o produto de cada linha
+let detecProdutos = [];
+let detecLista = [];
 
-function fmtBRL(n) {
-  return n.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+function fmtBRLPrice(n) {
+  return Number(n).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
 function renderDetecTabela() {
   const tbody = document.querySelector("#tableDetec tbody");
   tbody.innerHTML = detecLista.map((r, i) => {
     const opcoes = detecProdutos.map(p =>
-      `<option value="${p.id}" ${p.id === r.sugestao_produto_id ? "selected" : ""}>${p.name} · ${fmtBRL(p.price)}</option>`
+      `<option value="${p.id}" ${p.id === r.sugestao_produto_id ? "selected" : ""}>${p.name} · ${fmtBRLPrice(p.price)}</option>`
     ).join("");
     return `
       <tr data-i="${i}">
@@ -509,10 +718,34 @@ async function aplicarProdutos() {
     ${data.resultados.filter(r => !r.ok).slice(0, 10).map(r => `<small style="color:var(--danger)">erro em ${r.businessId}: ${r.erro}</small><br>`).join("")}
   `;
   btn.textContent = "Aplicado!";
-  // recarrega o dashboard
   setTimeout(() => { loadAll(); }, 2000);
 }
 
+// ====== EVENT LISTENERS ======
+document.getElementById("btnApply").addEventListener("click", () => { closeDateDropdown(); loadAll(); });
+document.getElementById("btnClear").addEventListener("click", () => {
+  document.getElementById("dateFrom").value = "";
+  document.getElementById("dateTo").value = "";
+  applyPreset("tudo");
+});
+document.getElementById("btnRefresh").addEventListener("click", async () => {
+  setStatus("limpando cache e recarregando...");
+  await fetch("/api/refresh", { method: "POST" });
+  loadAll();
+});
+document.getElementById("horasQuentes").addEventListener("change", loadQuentes);
+document.getElementById("horasFechamento").addEventListener("change", loadFechamento);
+document.getElementById("closeCart").addEventListener("click", () => {
+  document.getElementById("carteiraPanel").style.display = "none";
+});
+document.getElementById("btnExpandCarteira").addEventListener("click", () => {
+  const btn = document.getElementById("btnExpandCarteira");
+  renderCarteira(btn.dataset.expanded !== "1");
+});
+document.getElementById("btnExpandSemProduto").addEventListener("click", () => {
+  const btn = document.getElementById("btnExpandSemProduto");
+  renderSemProduto(btn.dataset.expanded !== "1");
+});
 document.getElementById("btnDetectarProduto").addEventListener("click", abrirDetec);
 document.getElementById("btnCancelDetec").addEventListener("click", fecharDetec);
 document.getElementById("btnAplicarProdutos").addEventListener("click", aplicarProdutos);
@@ -526,4 +759,34 @@ document.getElementById("checkAllDetec").addEventListener("change", e => {
   atualizaCountAplicar();
 });
 
-loadAll();
+// Date dropdown
+document.getElementById("btnDateDropdown").addEventListener("click", e => {
+  e.stopPropagation();
+  toggleDateDropdown();
+});
+document.querySelectorAll(".date-dropdown-menu button[data-preset]").forEach(btn => {
+  btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
+});
+document.addEventListener("click", e => {
+  const dd = document.getElementById("dateDropdownMenu");
+  const btn = document.getElementById("btnDateDropdown");
+  if (!dd.contains(e.target) && !btn.contains(e.target)) closeDateDropdown();
+});
+
+// Ajuda
+document.getElementById("btnAjuda").addEventListener("click", () => {
+  alert("Comercial Hub · Controle Interno\n\n" +
+    "📊 Dashboard — visão consolidada do dia\n" +
+    "📈 Relatórios — atividade do time (em construção)\n" +
+    "🕓 Futuros — leads em espera (em construção)\n" +
+    "👥 Vendedores — ficha individual dos 4\n" +
+    "📋 Registros — histórico diário (em construção)\n\n" +
+    "Modo Otimista soma vendas confirmadas + futuros.\n" +
+    "Modo Realista mostra só as confirmadas (AGENDADO)."
+  );
+});
+
+// Init
+setupTabs();
+setupModeTabs();
+applyPreset("hoje");  // já chama loadAll()

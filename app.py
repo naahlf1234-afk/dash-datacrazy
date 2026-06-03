@@ -2,15 +2,23 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from collections import Counter, defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
 from flask import Flask, jsonify, render_template, request
 
+import contract_parser
 import datacrazy_client as dc
 
 app = Flask(__name__)
+
+# Operação atual começa em 22/05/2026 — qualquer movimentação antes disso é
+# histórico de operação anterior e NÃO entra nas métricas.
+OPERATION_START_DATE = datetime(2026, 5, 22, 0, 0, 0, tzinfo=timezone.utc)
 
 
 def _now_utc() -> datetime:
@@ -39,10 +47,16 @@ def _is_in_period(iso: str | None, date_from: datetime | None, date_to: datetime
     return True
 
 
+def _effective_from(date_from: datetime | None) -> datetime:
+    """Aplica o piso da operação. Filtros podem ser mais restritivos, nunca menos."""
+    if date_from and date_from > OPERATION_START_DATE:
+        return date_from
+    return OPERATION_START_DATE
+
+
 def _filter_period(businesses: list[dict], date_from: datetime | None, date_to: datetime | None) -> list[dict]:
-    if not date_from and not date_to:
-        return businesses
-    return [b for b in businesses if _is_in_period(b.get("lastMovedAt"), date_from, date_to)]
+    eff_from = _effective_from(date_from)
+    return [b for b in businesses if _is_in_period(b.get("lastMovedAt"), eff_from, date_to)]
 
 
 def _get_period():
@@ -73,7 +87,8 @@ def resumo():
     """Cards de topo: vendas, em fechamento (pre-venda humana), desqualificados, leads, conversas."""
     df, dt = _get_period()
     businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
-    leads_list = dc.leads()
+    # Leads também filtrados pelo piso da operação (22/05/2026)
+    leads_list = dc.leads(date_from=_effective_from(df).isoformat())
     convs = dc.conversations(status="opened")
 
     total_negocios = len(businesses)
@@ -95,6 +110,151 @@ def resumo():
         "taxa_conversao": taxa_conversao,
         "total_leads": len(leads_list),
         "conversas_abertas": len(convs),
+    })
+
+
+# ===== EXTRAÇÃO DE CONTRATOS (FASE 2) =====
+_contracts_cache_lock = threading.Lock()
+_contracts_cache: dict[str, Any] = {"ts": 0.0, "data": []}
+CONTRACTS_CACHE_TTL = 600  # 10 min
+
+
+def _extract_one_contract(biz: dict) -> dict:
+    """Lê a conversa do lead e tenta extrair o contrato. Devolve sempre algo (com ou sem contract)."""
+    lead_id = biz.get("leadId")
+    contract = None
+    if lead_id:
+        conv = dc.conversation_by_lead(lead_id)
+        if conv and conv.get("id"):
+            msgs = dc.conversation_messages(conv["id"], limit=50)
+            contract = contract_parser.find_contract_in_messages(msgs)
+    return {
+        "businessId": biz.get("id"),
+        "code": biz.get("code"),
+        "leadId": lead_id,
+        "leadName": biz.get("leadName"),
+        "attendantId": biz.get("attendantId"),
+        "attendantName": (biz.get("attendantName") or "—").strip(),
+        "lastMovedAt": biz.get("lastMovedAt"),
+        "business_total": biz.get("total") or 0,
+        "contract": contract,
+    }
+
+
+def _get_all_contracts_cached() -> list[dict]:
+    """Extrai contratos de TODOS os AGENDADO pós-22/05/2026. Cache 10 min.
+    Primeira chamada é cara (~30-60s com paralelismo), depois é instantânea."""
+    with _contracts_cache_lock:
+        if time.time() - _contracts_cache["ts"] < CONTRACTS_CACHE_TTL and _contracts_cache["data"]:
+            return _contracts_cache["data"]
+
+    stage_id = next(s["id"] for s in dc.STAGES_API if s["name"] == STAGE_VENDA)
+    agendados = dc.businesses_by_stage(stage_id)
+
+    # aplica o piso da operação
+    agendados_pos = []
+    for b in agendados:
+        moved = _parse_iso(b.get("lastMovedAt"))
+        if moved and moved >= OPERATION_START_DATE:
+            agendados_pos.append(b)
+
+    results: list[dict] = []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [pool.submit(_extract_one_contract, b) for b in agendados_pos]
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except Exception as e:
+                print(f"[contratos] erro extraindo: {e}")
+
+    with _contracts_cache_lock:
+        _contracts_cache["ts"] = time.time()
+        _contracts_cache["data"] = results
+
+    return results
+
+
+def _filter_contracts_in_period(all_data: list[dict], df: datetime | None, dt: datetime | None) -> list[dict]:
+    eff_from = _effective_from(df)
+    out = []
+    for d in all_data:
+        moved = _parse_iso(d.get("lastMovedAt"))
+        if not moved or moved < eff_from:
+            continue
+        if dt and moved > dt:
+            continue
+        out.append(d)
+    return out
+
+
+@app.route("/api/faturamento")
+def faturamento():
+    """Faturamento, ticket médio, % 6 meses, % antecipadas a partir dos contratos extraídos."""
+    df, dt = _get_period()
+    all_data = _get_all_contracts_cached()
+    in_window = _filter_contracts_in_period(all_data, df, dt)
+    com_contrato = [d for d in in_window if d["contract"]]
+
+    valores = [d["contract"]["valor"] for d in com_contrato if d["contract"].get("valor")]
+    fat = sum(valores)
+    ticket = (fat / len(valores)) if valores else 0
+
+    seis = sum(1 for d in com_contrato if d["contract"].get("plano_meses") == 6)
+    pct_6 = (seis / len(com_contrato) * 100) if com_contrato else 0
+
+    antecip = sum(1 for d in com_contrato if d["contract"].get("is_antecipada") is True)
+    pct_antecip = (antecip / len(com_contrato) * 100) if com_contrato else 0
+
+    return jsonify({
+        "faturamento": round(fat, 2),
+        "ticket_medio": round(ticket, 2),
+        "total_agendados": len(in_window),
+        "com_contrato": len(com_contrato),
+        "sem_contrato": len(in_window) - len(com_contrato),
+        "pct_6_meses": round(pct_6, 1),
+        "pct_antecipadas": round(pct_antecip, 1),
+    })
+
+
+@app.route("/api/contratos")
+def contratos():
+    """Lista completa dos contratos extraídos no período."""
+    df, dt = _get_period()
+    all_data = _get_all_contracts_cached()
+    in_window = _filter_contracts_in_period(all_data, df, dt)
+    return jsonify({
+        "total": len(in_window),
+        "com_contrato": sum(1 for d in in_window if d["contract"]),
+        "sem_contrato": sum(1 for d in in_window if not d["contract"]),
+        "lista": in_window,
+    })
+
+
+@app.route("/api/sem-contrato")
+def sem_contrato():
+    """Vendas AGENDADAS que NÃO têm contrato enviado na conversa do CRM.
+    Esse é o alerta principal pra o gerente: venda suspeita / não formalizada."""
+    df, dt = _get_period()
+    all_data = _get_all_contracts_cached()
+    in_window = _filter_contracts_in_period(all_data, df, dt)
+    sem = [d for d in in_window if not d["contract"]]
+    sem.sort(key=lambda x: x.get("lastMovedAt") or "", reverse=True)
+
+    # agrupa por vendedor pra mostrar quem tá deixando passar
+    by_vendedor: dict[str, int] = {}
+    for d in sem:
+        n = d["attendantName"]
+        by_vendedor[n] = by_vendedor.get(n, 0) + 1
+    by_vendedor_list = sorted(
+        [{"vendedor": k, "count": v} for k, v in by_vendedor.items()],
+        key=lambda x: x["count"], reverse=True,
+    )
+
+    return jsonify({
+        "total_sem_contrato": len(sem),
+        "total_no_periodo": len(in_window),
+        "por_vendedor": by_vendedor_list,
+        "lista": sem[:50],
     })
 
 

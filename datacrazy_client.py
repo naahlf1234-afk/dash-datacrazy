@@ -36,8 +36,8 @@ STAGES_API: list[dict[str, Any]] = [
 VENDEDORES = [
     {"userId": "0Diym19CpgY34hsoRkukGKPZzDw2", "name": "Michele Langendorf"},
     {"userId": "5HvOBh3dkoRFMdUBr9mRPyE4LA12", "name": "Luan Sampaio"},
-    {"userId": "Qg7qLXgMlYVvqrAbRDaqQsa95qf1", "name": "Jeremias Santos Aragão"},
     {"userId": "AVSCM8VJtkZxIGVuDEIZEG9fzYD3", "name": "Alysson Oliveira"},
+    {"userId": "wHNGaeo0SmYk0MiwvQ7LOdnXdcG3", "name": "Kauã Adryl"},
 ]
 
 VENDEDOR_IDS = {v["userId"] for v in VENDEDORES}

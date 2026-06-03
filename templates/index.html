@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Comercial Hub — Dashboard</title>
+  <title>Comercial Hub — Controle Interno</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -13,233 +13,425 @@
 <body>
   <aside class="sidebar">
     <div class="brand">
-      <div class="brand-icon">⌖</div>
+      <div class="brand-icon">📊</div>
       <div class="brand-text">
         <div class="brand-title">Comercial Hub</div>
-        <div class="brand-sub">Pipeline · API</div>
+        <div class="brand-sub">Controle Interno</div>
       </div>
     </div>
 
     <nav class="nav">
-      <div class="nav-section">Visão geral</div>
-      <a href="#resumo" class="nav-item active"><span class="nav-icon">📊</span> Resumo</a>
-      <a href="#funil" class="nav-item"><span class="nav-icon">📈</span> Funil</a>
-      <a href="#conversas" class="nav-item"><span class="nav-icon">💬</span> Conversas</a>
-
-      <div class="nav-section">Equipe</div>
-      <a href="#ranking" class="nav-item"><span class="nav-icon">🏆</span> Ranking</a>
-
-      <div class="nav-section">Ação imediata</div>
-      <a href="#quentes" class="nav-item nav-hot"><span class="nav-icon">🔥</span> Leads quentes</a>
-      <a href="#fechamento" class="nav-item"><span class="nav-icon">⚡</span> Em fechamento</a>
-      <a href="#sem-produto" class="nav-item"><span class="nav-icon">📦</span> Sem produto</a>
+      <div class="nav-section">Menu</div>
+      <a href="#" class="nav-item active" data-tab="dashboard">
+        <span class="nav-icon">📊</span><span class="nav-emoji">🚀</span> Dashboard
+      </a>
+      <a href="#" class="nav-item" data-tab="relatorios">
+        <span class="nav-icon">📈</span><span class="nav-emoji">📊</span> Relatórios
+      </a>
+      <a href="#" class="nav-item" data-tab="futuros">
+        <span class="nav-icon">🕓</span><span class="nav-emoji">⏳</span> Futuros
+      </a>
+      <a href="#" class="nav-item" data-tab="vendedores">
+        <span class="nav-icon">👥</span><span class="nav-emoji">🧑‍💼</span> Vendedores
+      </a>
+      <a href="#" class="nav-item" data-tab="registros">
+        <span class="nav-icon">📋</span><span class="nav-emoji">📝</span> Registros
+      </a>
     </nav>
 
     <div class="sidebar-footer">
-      Comercial Hub v1.0<br>
+      Comercial Hub v2.0<br>
       <span id="syncFooter">aguardando…</span>
     </div>
   </aside>
 
   <main class="main">
-    <header class="page-header">
-      <div>
-        <h1>Dashboard Comercial</h1>
-        <p class="subtitle">Pipeline API · 4 vendedores · operação nutra (COD)</p>
-      </div>
-      <div class="header-actions">
-        <div id="goldenBadge" class="golden-badge">aguardando…</div>
-        <button id="btnRefresh" class="btn btn-primary">↻ Atualizar</button>
-      </div>
-    </header>
+    <!-- =================== TAB: DASHBOARD =================== -->
+    <section class="tab-content active" data-tab-content="dashboard">
+      <header class="page-header">
+        <div>
+          <h1>Dashboard</h1>
+          <p class="subtitle">
+            <span class="mode-indicator mode-otimista"></span>
+            <span id="modeLabel">Otimista — Confirmadas + Reservas/Futuros</span>
+          </p>
+        </div>
+        <div class="header-actions">
+          <div id="goldenBadge" class="golden-badge">aguardando…</div>
+          <div class="sync-text">Sync: <span id="syncTime">—</span></div>
+          <button id="btnAjuda" class="btn btn-ghost">❓ Ajuda</button>
+          <button id="btnRefresh" class="btn btn-ghost">↻ Atualizar</button>
+        </div>
+      </header>
 
-    <div class="filter-bar">
-      <div class="filter-group">
-        <label>De</label>
-        <input type="datetime-local" id="dateFrom">
+      <div class="mode-tabs">
+        <button class="mode-tab active" data-mode="otimista">
+          <span class="mode-dot mode-dot-otimista"></span> Otimista
+        </button>
+        <button class="mode-tab" data-mode="realista">
+          <span class="mode-dot mode-dot-realista"></span> Realista
+        </button>
       </div>
-      <div class="filter-group">
-        <label>Até</label>
-        <input type="datetime-local" id="dateTo">
+
+      <div class="filter-bar">
+        <div class="date-dropdown">
+          <button class="date-dropdown-btn" id="btnDateDropdown">
+            <span class="date-icon">🔽</span>
+            <span id="datePreset">Hoje · <span id="dateLabel">—</span></span>
+          </button>
+          <div class="date-dropdown-menu" id="dateDropdownMenu">
+            <button data-preset="hoje">Hoje</button>
+            <button data-preset="ontem">Ontem</button>
+            <button data-preset="semana">Últimos 7 dias</button>
+            <button data-preset="mes">Últimos 30 dias</button>
+            <button data-preset="mes-atual">Este mês</button>
+            <button data-preset="tudo">Todo o histórico</button>
+            <hr>
+            <div class="date-custom">
+              <label>De</label>
+              <input type="datetime-local" id="dateFrom">
+              <label>Até</label>
+              <input type="datetime-local" id="dateTo">
+              <button id="btnApply" class="btn btn-primary btn-sm">Aplicar</button>
+              <button id="btnClear" class="btn btn-ghost btn-sm">Limpar</button>
+            </div>
+          </div>
+        </div>
+        <div id="status" class="status-text"></div>
       </div>
-      <button id="btnApply" class="btn btn-ghost">Aplicar</button>
-      <button id="btnClear" class="btn btn-ghost">Limpar</button>
-      <div id="status" class="status-text"></div>
-    </div>
 
-    <section id="resumo" class="cards-grid" aria-label="Resumo"></section>
+      <!-- 8 cards principais (estilo Sales Hub) -->
+      <div class="cards-grid-8">
+        <div class="metric-card">
+          <div class="metric-label">TOTAL LEADS</div>
+          <div class="metric-value" id="mLeads">0</div>
+          <div class="metric-hint" id="mLeadsHint">— vendedores</div>
+        </div>
+        <div class="metric-card metric-success">
+          <div class="metric-label">TOTAL VENDAS</div>
+          <div class="metric-value" id="mVendas">0</div>
+          <div class="metric-hint" id="mVendasHint">— confirm. · — futuros</div>
+        </div>
+        <div class="metric-card metric-warn">
+          <div class="metric-label">TOTAL FUTUROS</div>
+          <div class="metric-value" id="mFuturos">0</div>
+          <div class="metric-hint">Reservas/Agendadas</div>
+        </div>
+        <div class="metric-card metric-success">
+          <div class="metric-label">% CONVERSÃO</div>
+          <div class="metric-value" id="mConversao">0.0%</div>
+          <div class="metric-hint">Vendas / Leads</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">FATURAMENTO</div>
+          <div class="metric-value money" id="mFaturamento">R$ 0</div>
+          <div class="metric-hint">Só confirmadas</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-label">TICKET MÉDIO</div>
+          <div class="metric-value money" id="mTicket">R$ 0</div>
+          <div class="metric-hint">Por confirmada</div>
+        </div>
+        <div class="metric-card metric-success">
+          <div class="metric-label">% 6 MESES</div>
+          <div class="metric-value" id="mSeisMeses">0.0%</div>
+          <div class="metric-hint">Planos semestrais</div>
+        </div>
+        <div class="metric-card metric-info">
+          <div class="metric-label">% ANTECIPADAS</div>
+          <div class="metric-value" id="mAntecipadas">0.0%</div>
+          <div class="metric-hint">Do total de vendas</div>
+        </div>
+      </div>
 
-    <div class="grid-2">
-      <section id="funil" class="panel">
+      <!-- ⚠️ ALERTA: vendas sem contrato enviado -->
+      <section id="alertSemContrato" class="panel panel-hot" style="display:none">
         <header class="panel-header">
-          <h2>Funil — Pipeline API <span id="countFunil" class="count-badge">—</span></h2>
-          <span class="panel-sub">Distribuição atual por estágio</span>
+          <h2>⚠️ Vendas sem contrato <span id="countSemContrato" class="count-badge count-warn">—</span></h2>
+          <span class="panel-sub" id="semContratoSub">Vendedores precisam enviar a declaração na conversa do CRM</span>
         </header>
-        <canvas id="chartFunil"></canvas>
-      </section>
-
-      <section id="conversas" class="panel">
-        <header class="panel-header">
-          <h2>Conversas ativas <span id="countConversas" class="count-badge">—</span></h2>
-          <span class="panel-sub">Por vendedor — abertas + aguardando</span>
-        </header>
-        <canvas id="chartConversas"></canvas>
-        <div id="convResumo" class="panel-foot"></div>
-      </section>
-    </div>
-
-    <section id="ranking" class="panel">
-      <header class="panel-header">
-        <h2>Ranking dos vendedores <span id="countRanking" class="count-badge">—</span></h2>
-        <span class="panel-sub">Ordenado por vendas (AGENDADO)</span>
-      </header>
-      <div class="table-wrap">
-        <table id="tableRanking">
-          <thead>
-            <tr>
-              <th>Vendedor</th>
-              <th>Vendas</th>
-              <th>Conv.</th>
-              <th>Negociação</th>
-              <th>Fechamento</th>
-              <th>Desqualif.</th>
-              <th>Total</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section id="quentes" class="panel panel-hot">
-      <header class="panel-header">
-        <h2>🔥 Leads quentes <span id="countQuentes" class="count-badge count-hot">—</span></h2>
-        <span class="panel-sub">
-          Janela das últimas
-          <input type="number" id="horasQuentes" value="24" min="1" max="168" class="inline-input">
-          horas · só leads com sinal de intenção (palavras-chave)
-        </span>
-      </header>
-      <div id="loadingQuentes" class="loading-text">calculando…</div>
-      <div class="table-wrap">
-        <table id="tableQuentes" style="display:none">
-          <thead>
-            <tr>
-              <th>Score</th>
-              <th>Lead</th>
-              <th>Vendedor</th>
-              <th>Estágio</th>
-              <th>Última msg do lead</th>
-              <th>Por quê</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
-      </div>
-    </section>
-
-    <section id="sem-produto" class="panel panel-warn">
-      <header class="panel-header">
-        <h2>📦 Agendados sem produto <span id="countSemProduto" class="count-badge count-warn">—</span></h2>
-        <span class="panel-sub" id="semProdutoSub">vendas sem vínculo de produto no CRM</span>
-        <button id="btnDetectarProduto" class="btn btn-primary" style="margin-left:auto">🔍 Detectar produtos</button>
-      </header>
-      <div id="semProdutoStats" class="carteira-stats"></div>
-
-      <div id="semProdutoModoLista">
+        <div id="semContratoPorVendedor" class="carteira-stats"></div>
         <div class="table-wrap">
-          <table id="tableSemProduto">
+          <table id="tableSemContrato">
+            <thead>
+              <tr>
+                <th>Lead</th>
+                <th>Vendedor</th>
+                <th>Movido pra Agendado</th>
+                <th>Há</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Painéis existentes (funil + conversas lado a lado) -->
+      <div class="grid-2">
+        <section id="funil" class="panel">
+          <header class="panel-header">
+            <h2>Funil — Pipeline API <span id="countFunil" class="count-badge">—</span></h2>
+            <span class="panel-sub">Distribuição atual por estágio</span>
+          </header>
+          <canvas id="chartFunil"></canvas>
+        </section>
+
+        <section id="conversas" class="panel">
+          <header class="panel-header">
+            <h2>Conversas ativas <span id="countConversas" class="count-badge">—</span></h2>
+            <span class="panel-sub">Por vendedor — abertas + aguardando</span>
+          </header>
+          <canvas id="chartConversas"></canvas>
+          <div id="convResumo" class="panel-foot"></div>
+        </section>
+      </div>
+
+      <section id="ranking" class="panel">
+        <header class="panel-header">
+          <h2>🏆 Ranking dos vendedores <span id="countRanking" class="count-badge">—</span></h2>
+          <span class="panel-sub">Ordenado por vendas (AGENDADO)</span>
+        </header>
+        <div class="table-wrap">
+          <table id="tableRanking">
+            <thead>
+              <tr>
+                <th>Vendedor</th>
+                <th>Vendas</th>
+                <th>Conv.</th>
+                <th>Negociação</th>
+                <th>Fechamento</th>
+                <th>Desqualif.</th>
+                <th>Total</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="quentes" class="panel panel-hot">
+        <header class="panel-header">
+          <h2>🔥 Leads quentes <span id="countQuentes" class="count-badge count-hot">—</span></h2>
+          <span class="panel-sub">
+            Janela das últimas
+            <input type="number" id="horasQuentes" value="24" min="1" max="168" class="inline-input">
+            horas · só leads com sinal de intenção
+          </span>
+        </header>
+        <div id="loadingQuentes" class="loading-text">calculando…</div>
+        <div class="table-wrap">
+          <table id="tableQuentes" style="display:none">
+            <thead>
+              <tr>
+                <th>Score</th>
+                <th>Lead</th>
+                <th>Vendedor</th>
+                <th>Estágio</th>
+                <th>Última msg do lead</th>
+                <th>Por quê</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="sem-produto" class="panel panel-warn">
+        <header class="panel-header">
+          <h2>📦 Agendados sem produto <span id="countSemProduto" class="count-badge count-warn">—</span></h2>
+          <span class="panel-sub" id="semProdutoSub">vendas sem vínculo de produto no CRM</span>
+          <button id="btnDetectarProduto" class="btn btn-primary" style="margin-left:auto">🔍 Detectar produtos</button>
+        </header>
+        <div id="semProdutoStats" class="carteira-stats"></div>
+
+        <div id="semProdutoModoLista">
+          <div class="table-wrap">
+            <table id="tableSemProduto">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Lead</th>
+                  <th>Vendedor</th>
+                  <th>Movido em</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="semProdutoExpandWrap" class="carteira-expand-wrap" style="display:none">
+            <button id="btnExpandSemProduto" class="btn btn-ghost">Ver todos</button>
+          </div>
+        </div>
+
+        <div id="semProdutoModoDetec" style="display:none">
+          <div id="detecLoading" class="loading-text">analisando conversas… pode demorar 2-5 minutos na primeira vez</div>
+          <div id="detecResumo" class="carteira-stats" style="display:none"></div>
+          <div class="table-wrap">
+            <table id="tableDetec" style="display:none">
+              <thead>
+                <tr>
+                  <th><input type="checkbox" id="checkAllDetec"></th>
+                  <th>Lead</th>
+                  <th>Vendedor</th>
+                  <th>Produto detectado</th>
+                  <th>Razão</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="detecActions" class="carteira-expand-wrap" style="display:none">
+            <button id="btnCancelDetec" class="btn btn-ghost">Cancelar</button>
+            <button id="btnAplicarProdutos" class="btn btn-primary">Aplicar produtos selecionados (<span id="countAplicar">0</span>)</button>
+          </div>
+          <div id="detecResultado" style="display:none; margin-top:18px"></div>
+        </div>
+      </section>
+
+      <section id="fechamento" class="panel">
+        <header class="panel-header">
+          <h2>⚡ Em FECHAMENTO <span id="countFechamento" class="count-badge">—</span></h2>
+          <span class="panel-sub">
+            Negócios que chegaram nas últimas
+            <input type="number" id="horasFechamento" value="24" min="1" max="168" class="inline-input">
+            horas — aguardando confirmação humana
+          </span>
+        </header>
+        <div class="table-wrap">
+          <table id="tableFechamento">
+            <thead>
+              <tr>
+                <th>Lead</th>
+                <th>Vendedor</th>
+                <th>Última msg do lead</th>
+                <th>Há</th>
+                <th>No estágio há</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel" id="carteiraPanel" style="display:none">
+        <header class="panel-header">
+          <h2>Carteira de <span id="carteiraNome"></span> <span id="countCarteira" class="count-badge">—</span></h2>
+          <button id="closeCart" class="btn btn-ghost btn-icon">×</button>
+        </header>
+        <div id="carteiraStats" class="carteira-stats"></div>
+        <div class="table-wrap">
+          <table id="tableCarteira">
             <thead>
               <tr>
                 <th>Código</th>
                 <th>Lead</th>
-                <th>Vendedor</th>
-                <th>Movido em</th>
+                <th>Estágio</th>
+                <th>Último movimento</th>
               </tr>
             </thead>
             <tbody></tbody>
           </table>
         </div>
-        <div id="semProdutoExpandWrap" class="carteira-expand-wrap" style="display:none">
-          <button id="btnExpandSemProduto" class="btn btn-ghost">Ver todos</button>
+        <div id="carteiraExpandWrap" class="carteira-expand-wrap" style="display:none">
+          <button id="btnExpandCarteira" class="btn btn-ghost">Ver todos os <span id="totalCarteira">0</span> negócios</button>
         </div>
-      </div>
+      </section>
+    </section>
 
-      <div id="semProdutoModoDetec" style="display:none">
-        <div id="detecLoading" class="loading-text">analisando conversas… pode demorar 2-5 minutos na primeira vez</div>
-        <div id="detecResumo" class="carteira-stats" style="display:none"></div>
-        <div class="table-wrap">
-          <table id="tableDetec" style="display:none">
-            <thead>
-              <tr>
-                <th><input type="checkbox" id="checkAllDetec"></th>
-                <th>Lead</th>
-                <th>Vendedor</th>
-                <th>Produto detectado</th>
-                <th>Razão</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+    <!-- =================== TAB: RELATÓRIOS =================== -->
+    <section class="tab-content" data-tab-content="relatorios">
+      <header class="page-header">
+        <div>
+          <h1>Relatórios</h1>
+          <p class="subtitle">Atividade do time · ações por vendedor por dia</p>
         </div>
-        <div id="detecActions" class="carteira-expand-wrap" style="display:none">
-          <button id="btnCancelDetec" class="btn btn-ghost">Cancelar</button>
-          <button id="btnAplicarProdutos" class="btn btn-primary">Aplicar produtos selecionados (<span id="countAplicar">0</span>)</button>
-        </div>
-        <div id="detecResultado" style="display:none; margin-top:18px"></div>
+      </header>
+
+      <div class="placeholder-panel">
+        <div class="placeholder-icon">📊</div>
+        <h3>Em construção (Fase 4)</h3>
+        <p>Aqui virá o bloco de <b>atividade do time</b>:</p>
+        <ul>
+          <li>Etiquetas aplicadas hoje (por vendedor)</li>
+          <li>Notas internas escritas</li>
+          <li>Mensagens manuais (vendedor digitou) vs automação</li>
+          <li>Quem moveu pra Fechamento / Agendado / Perda</li>
+          <li>Timeline hora-por-hora de cada vendedor</li>
+        </ul>
+        <p class="placeholder-hint">Depende do <b>snapshot diário</b> que vai rodar à noite no Render.</p>
       </div>
     </section>
 
-    <section id="fechamento" class="panel">
-      <header class="panel-header">
-        <h2>⚡ Em FECHAMENTO <span id="countFechamento" class="count-badge">—</span></h2>
-        <span class="panel-sub">
-          Negócios que chegaram nas últimas
-          <input type="number" id="horasFechamento" value="24" min="1" max="168" class="inline-input">
-          horas — aguardando confirmação humana
-        </span>
+    <!-- =================== TAB: FUTUROS =================== -->
+    <section class="tab-content" data-tab-content="futuros">
+      <header class="page-header">
+        <div>
+          <h1>Futuros</h1>
+          <p class="subtitle">Leads em FOLLOW-UP e LEAD PRA O FUTURO · oportunidades latentes</p>
+        </div>
       </header>
-      <div class="table-wrap">
-        <table id="tableFechamento">
-          <thead>
-            <tr>
-              <th>Lead</th>
-              <th>Vendedor</th>
-              <th>Última msg do lead</th>
-              <th>Há</th>
-              <th>No estágio há</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+
+      <div class="placeholder-panel">
+        <div class="placeholder-icon">🕓</div>
+        <h3>Em construção</h3>
+        <p>Aqui virá a lista de leads em estágios de espera:</p>
+        <ul>
+          <li>Quem foi pra <b>FOLLOW-UP</b> — quando retomar?</li>
+          <li>Quem foi pra <b>LEAD PRA O FUTURO</b> — alertas de timing</li>
+          <li>Quanto tempo cada um tá esperando</li>
+          <li>Botão pra puxar de volta pra pipeline ativa</li>
+        </ul>
       </div>
     </section>
 
-    <section class="panel" id="carteiraPanel" style="display:none">
-      <header class="panel-header">
-        <h2>Carteira de <span id="carteiraNome"></span> <span id="countCarteira" class="count-badge">—</span></h2>
-        <button id="closeCart" class="btn btn-ghost btn-icon">×</button>
+    <!-- =================== TAB: VENDEDORES =================== -->
+    <section class="tab-content" data-tab-content="vendedores">
+      <header class="page-header">
+        <div>
+          <h1>Vendedores</h1>
+          <p class="subtitle">Ficha individual de Michele, Luan, Jeremias e Alysson</p>
+        </div>
       </header>
 
-      <div id="carteiraStats" class="carteira-stats"></div>
-
-      <div class="table-wrap">
-        <table id="tableCarteira">
-          <thead>
-            <tr>
-              <th>Código</th>
-              <th>Lead</th>
-              <th>Estágio</th>
-              <th>Último movimento</th>
-            </tr>
-          </thead>
-          <tbody></tbody>
-        </table>
+      <div id="vendedoresGrid" class="vendedores-grid">
+        <!-- preenchido via JS -->
       </div>
 
-      <div id="carteiraExpandWrap" class="carteira-expand-wrap" style="display:none">
-        <button id="btnExpandCarteira" class="btn btn-ghost">Ver todos os <span id="totalCarteira">0</span> negócios</button>
+      <div class="placeholder-panel" style="margin-top: 24px">
+        <div class="placeholder-icon">👥</div>
+        <h3>Ficha completa em construção</h3>
+        <p>Ao clicar em um vendedor virá:</p>
+        <ul>
+          <li>Tendência últimos 14 dias (gráfico)</li>
+          <li>Vendas do dia <b>extraídas do contrato</b> (nome real, valor real)</li>
+          <li>Timeline de atividade do dia</li>
+          <li>Campo de notas suas (feedback registrado)</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- =================== TAB: REGISTROS =================== -->
+    <section class="tab-content" data-tab-content="registros">
+      <header class="page-header">
+        <div>
+          <h1>Registros</h1>
+          <p class="subtitle">Histórico diário · snapshots e comparativos</p>
+        </div>
+      </header>
+
+      <div class="placeholder-panel">
+        <div class="placeholder-icon">📋</div>
+        <h3>Em construção (Fase 4)</h3>
+        <p>Aqui virá o histórico acumulado pelo snapshot noturno:</p>
+        <ul>
+          <li>Vendas dia-a-dia (gráfico de barras)</li>
+          <li>Comparativo semana vs semana</li>
+          <li>Comparativo mês vs mês</li>
+          <li>Exportar relatório em PDF / Excel</li>
+        </ul>
+        <p class="placeholder-hint">Começa a popular automaticamente depois que o snapshot rodar pela primeira vez.</p>
       </div>
     </section>
   </main>
