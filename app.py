@@ -13,6 +13,7 @@ from flask import Flask, jsonify, render_template, request
 
 import contract_parser
 import datacrazy_client as dc
+import fechamento_monitor
 
 app = Flask(__name__)
 
@@ -228,6 +229,86 @@ def contratos():
         "com_contrato": sum(1 for d in in_window if d["contract"]),
         "sem_contrato": sum(1 for d in in_window if not d["contract"]),
         "lista": in_window,
+    })
+
+
+@app.route("/api/fechamento-monitor/status")
+def fech_monitor_status():
+    return jsonify(fechamento_monitor.status())
+
+
+@app.route("/api/fechamento-monitor/eventos")
+def fech_monitor_eventos():
+    """Eventos reais detectados pelo monitor (precisão 100%, mas só pós-bootstrap).
+    Agrupa entradas em FECHAMENTO por vendedor.
+
+    Filtros:
+    - ?dia=YYYY-MM-DD (Brasília)
+    - ?dias=N (últimos N dias)
+    """
+    from datetime import date
+    dia_str = request.args.get("dia")
+    dias = int(request.args.get("dias", 0))
+
+    BRT = timezone(timedelta(hours=-3))
+
+    if dia_str:
+        try:
+            dia_dt = date.fromisoformat(dia_str)
+        except ValueError:
+            return jsonify({"error": "dia inválido"}), 400
+        de = datetime(dia_dt.year, dia_dt.month, dia_dt.day, 0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
+        ate = datetime(dia_dt.year, dia_dt.month, dia_dt.day, 23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
+    elif dias > 0:
+        ate = _now_utc()
+        de = ate - timedelta(days=dias)
+    else:
+        now_brt = _now_utc().astimezone(BRT)
+        today_brt = now_brt.date()
+        de = datetime(today_brt.year, today_brt.month, today_brt.day, 0, 0, 0, tzinfo=BRT).astimezone(timezone.utc)
+        ate = datetime(today_brt.year, today_brt.month, today_brt.day, 23, 59, 59, tzinfo=BRT).astimezone(timezone.utc)
+
+    # Só "entered" — quem ENTROU em FECHAMENTO no período
+    eventos = fechamento_monitor.read_events(de=de, ate=ate, tipo="entered")
+
+    att_to_user = dc.attendant_id_to_user_id()
+    by_user: dict[str, dict] = {
+        v["userId"]: {"vendedor": v, "count": 0, "leads": []}
+        for v in dc.VENDEDORES
+    }
+    sem_dono = {"vendedor": {"userId": None, "name": "Sem atendente"}, "count": 0, "leads": []}
+    outros = {"vendedor": {"userId": "outros", "name": "Outros"}, "count": 0, "leads": []}
+
+    for e in eventos:
+        att_id = e.get("attendantId")
+        if not att_id:
+            bucket = sem_dono
+        else:
+            user_id = att_to_user.get(att_id)
+            bucket = by_user.get(user_id, outros) if user_id else outros
+        bucket["count"] += 1
+        bucket["leads"].append({
+            "code": e.get("code"),
+            "leadId": e.get("leadId"),
+            "leadName": e.get("leadName"),
+            "at": e.get("at"),
+        })
+
+    for bucket in list(by_user.values()) + [sem_dono, outros]:
+        bucket["leads"].sort(key=lambda x: x.get("at") or "", reverse=True)
+
+    result = list(by_user.values())
+    if outros["count"] > 0:
+        result.append(outros)
+    if sem_dono["count"] > 0:
+        result.append(sem_dono)
+    result.sort(key=lambda x: x["count"], reverse=True)
+
+    return jsonify({
+        "total": sum(b["count"] for b in result),
+        "por_vendedor": result,
+        "monitor_status": fechamento_monitor.status(),
+        "periodo": {"de": de.isoformat(), "ate": ate.isoformat()},
     })
 
 
@@ -1128,6 +1209,9 @@ def _warmup_async():
 
 # Dispara warm-up no carregamento do módulo (1x, daemon)
 threading.Thread(target=_warmup_async, daemon=True).start()
+
+# Inicia monitor de FECHAMENTO em alta frequência (1x, daemon)
+fechamento_monitor.start()
 
 
 if __name__ == "__main__":

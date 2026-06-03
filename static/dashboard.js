@@ -376,18 +376,32 @@ async function loadRelatorioFechamentos() {
   const cardsEl = document.getElementById("relFechCards");
   cardsEl.innerHTML = `<div style="grid-column:1/-1;color:var(--text-dim);padding:20px">Carregando…</div>`;
 
+  // Status do monitor sempre primeiro
+  loadMonitorStatus();
+
+  const fonte = document.getElementById("relFechFonte").value;
+  const endpoint = fonte === "monitor" ? "/api/fechamento-monitor/eventos" : "/api/passou-fechamento";
+  document.getElementById("relFechSub").textContent = fonte === "monitor"
+    ? "Modo preciso · dados do monitor (a partir da hora de bootstrap)"
+    : "Modo aproximado · usa lastMovedAt (~95% pro fluxo COD)";
+
   try {
-    const data = await fetchJson(`/api/passou-fechamento${relFechQuery()}`);
+    const data = await fetchJson(`${endpoint}${relFechQuery()}`);
     _relFechCache = data;
     setCount("relCountFech", data.total);
 
-    // Resumo de destinos no topo
-    document.getElementById("relFechDestinos").innerHTML = Object.entries(data.destinos_atuais)
-      .sort(([,a],[,b]) => b - a)
-      .map(([stage, count]) => {
-        const s = DESTINO_STYLES[stage] || { bg: "#f1f5f9", color: "#475569" };
-        return `<span class="carteira-stat" style="background:${s.bg};color:${s.color};border-color:${s.color}33"><b>${count}</b> ${s.label || stage}</span>`;
-      }).join("");
+    // Resumo de destinos (só no modo aproximado tem essa info)
+    const destEl = document.getElementById("relFechDestinos");
+    if (data.destinos_atuais) {
+      destEl.innerHTML = Object.entries(data.destinos_atuais)
+        .sort(([,a],[,b]) => b - a)
+        .map(([stage, count]) => {
+          const s = DESTINO_STYLES[stage] || { bg: "#f1f5f9", color: "#475569" };
+          return `<span class="carteira-stat" style="background:${s.bg};color:${s.color};border-color:${s.color}33"><b>${count}</b> ${s.label || stage}</span>`;
+        }).join("");
+    } else {
+      destEl.innerHTML = "";
+    }
 
     // Cards por vendedor
     cardsEl.innerHTML = data.por_vendedor.map(v => {
@@ -395,6 +409,7 @@ async function loadRelatorioFechamentos() {
       const isExVendedor = v.vendedor.userId === "outros" || v.vendedor.userId === null;
       const vendeu = v.destinos?.AGENDADO || 0;
       const taxa = v.count > 0 ? Math.round(vendeu / v.count * 100) : 0;
+      const hasDestinos = !!v.destinos;
       return `
         <div class="vendedor-card" data-user="${v.vendedor.userId || 'sem'}">
           <div class="vendedor-avatar" style="${isExVendedor ? 'background: linear-gradient(135deg,#94a3b8,#64748b);' : ''}">${iniciais}</div>
@@ -405,14 +420,16 @@ async function loadRelatorioFechamentos() {
               <div class="vendedor-stat-value" style="color:#f59e0b">${v.count}</div>
               <div class="vendedor-stat-label">Passaram</div>
             </div>
-            <div class="vendedor-stat">
-              <div class="vendedor-stat-value" style="color:#16a34a">${vendeu}</div>
-              <div class="vendedor-stat-label">Venderam</div>
-            </div>
-            <div class="vendedor-stat">
-              <div class="vendedor-stat-value">${taxa}%</div>
-              <div class="vendedor-stat-label">Convers.</div>
-            </div>
+            ${hasDestinos ? `
+              <div class="vendedor-stat">
+                <div class="vendedor-stat-value" style="color:#16a34a">${vendeu}</div>
+                <div class="vendedor-stat-label">Venderam</div>
+              </div>
+              <div class="vendedor-stat">
+                <div class="vendedor-stat-value">${taxa}%</div>
+                <div class="vendedor-stat-label">Convers.</div>
+              </div>
+            ` : ""}
           </div>
         </div>
       `;
@@ -435,7 +452,9 @@ function mostrarFechamentosVendedor(userId) {
   if (!bucket) return;
 
   const det = document.getElementById("relFechDetalhe");
-  if (!bucket.negocios.length) {
+  // monitor retorna .leads, aprox retorna .negocios
+  const itens = bucket.leads || bucket.negocios || [];
+  if (!itens.length) {
     det.innerHTML = `<div style="color:var(--text-dim);padding:12px 0">Sem leads nesse período.</div>`;
     return;
   }
@@ -444,17 +463,21 @@ function mostrarFechamentosVendedor(userId) {
     <div class="table-wrap">
       <table>
         <thead>
-          <tr><th>Lead</th><th>Código</th><th>Destino atual</th><th>Movido em</th></tr>
+          <tr><th>Lead</th><th>Código</th>${bucket.negocios ? "<th>Destino atual</th>" : ""}<th>Quando</th></tr>
         </thead>
         <tbody>
-          ${bucket.negocios.map(n => {
-            const s = DESTINO_STYLES[n.destino_atual] || { color: "#475569", bg: "#f1f5f9" };
+          ${itens.map(n => {
+            const when = n.lastMovedAt || n.at;
+            const destinoCol = bucket.negocios ? (() => {
+              const s = DESTINO_STYLES[n.destino_atual] || { color: "#475569", bg: "#f1f5f9" };
+              return `<td><span class="tag-paid" style="background:${s.bg};color:${s.color}">${s.label || n.destino_atual}</span></td>`;
+            })() : "";
             return `
               <tr>
                 <td><b>${n.leadName || "—"}</b></td>
                 <td>#${n.code}</td>
-                <td><span class="tag-paid" style="background:${s.bg};color:${s.color}">${s.label || n.destino_atual}</span></td>
-                <td>${n.lastMovedAt ? new Date(n.lastMovedAt).toLocaleString("pt-BR") : "—"} <small style="color:var(--text-dim)">(${timeAgo(n.lastMovedAt)})</small></td>
+                ${destinoCol}
+                <td>${when ? new Date(when).toLocaleString("pt-BR") : "—"} <small style="color:var(--text-dim)">(${timeAgo(when)})</small></td>
               </tr>
             `;
           }).join("")}
@@ -462,6 +485,30 @@ function mostrarFechamentosVendedor(userId) {
       </table>
     </div>
   `;
+}
+
+async function loadMonitorStatus() {
+  try {
+    const s = await fetchJson("/api/fechamento-monitor/status");
+    const el = document.getElementById("relMonitorStatus");
+    if (!s.rodando) {
+      el.innerHTML = `<span class="carteira-stat carteira-stat-danger">Monitor preciso: <b>parado</b></span>`;
+      return;
+    }
+    const desdeIso = s.iniciado_em;
+    const desde = desdeIso ? new Date(desdeIso) : null;
+    const desdeStr = desde ? desde.toLocaleString("pt-BR") : "agora";
+    const horasAtivo = desde ? Math.round((Date.now() - desde.getTime()) / 3600000) : 0;
+    el.innerHTML = `
+      <span class="carteira-stat carteira-stat-venda">🟢 Monitor ativo desde <b>${desdeStr}</b> (${horasAtivo}h)</span>
+      <span class="carteira-stat">Em fechamento agora: <b>${s.atualmente_em_fechamento}</b></span>
+      <span class="carteira-stat">Eventos registrados: <b>${s.total_eventos_registrados}</b></span>
+      <span class="carteira-stat">Snapshot a cada <b>${Math.round(s.intervalo_segundos / 60)} min</b></span>
+    `;
+  } catch (e) {
+    document.getElementById("relMonitorStatus").innerHTML =
+      `<span class="carteira-stat carteira-stat-danger">Status do monitor indisponível</span>`;
+  }
 }
 
 // ====== FICHA INDIVIDUAL DO VENDEDOR ======
@@ -588,6 +635,7 @@ document.getElementById("vdClose")?.addEventListener("click", () => {
   document.getElementById("vendedorDetail").style.display = "none";
 });
 
+document.getElementById("relFechFonte")?.addEventListener("change", loadRelatorioFechamentos);
 document.getElementById("relFechFiltro")?.addEventListener("change", e => {
   const dataInput = document.getElementById("relFechData");
   if (e.target.value === "data") {

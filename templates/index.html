@@ -349,12 +349,19 @@
         </div>
       </header>
 
-      <!-- Passaram por FECHAMENTO (aproximação via lastMovedAt) -->
+      <!-- Status do monitor de alta frequência -->
+      <div id="relMonitorStatus" class="carteira-stats" style="margin-bottom: 16px"></div>
+
+      <!-- Passaram por FECHAMENTO -->
       <section class="panel">
         <header class="panel-header">
           <h2>⚡ Passaram por FECHAMENTO <span id="relCountFech" class="count-badge">—</span></h2>
-          <span class="panel-sub">Quantos leads chegaram pra cada vendedor — incluindo os que já saíram</span>
-          <select id="relFechFiltro" class="select-produto" style="margin-left:auto; width:auto">
+          <span class="panel-sub" id="relFechSub">Quantos leads chegaram pra cada vendedor</span>
+          <select id="relFechFonte" class="select-produto" style="margin-left:auto; width:auto">
+            <option value="aprox" selected>Aproximado (histórico)</option>
+            <option value="monitor">Preciso (monitor)</option>
+          </select>
+          <select id="relFechFiltro" class="select-produto" style="margin-left:8px; width:auto">
             <option value="hoje" selected>Hoje</option>
             <option value="ontem">Ontem</option>
             <option value="7">Últimos 7 dias</option>
