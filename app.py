@@ -855,8 +855,25 @@ def leads_fechamento():
     return jsonify(result)
 
 
+# ===== WARM-UP: pré-carrega caches em background na startup =====
+def _warmup_async():
+    """Aquece caches assim que o servidor sobe pra primeira request do user
+    não pagar o custo de cold start do MCP. Daemon, erros silenciosos."""
+    try:
+        time.sleep(3)
+        dc.all_businesses_api_pipeline()
+        print("[warmup] businesses ok", flush=True)
+        _get_all_contracts_cached()
+        print("[warmup] contratos ok", flush=True)
+    except Exception as e:
+        print(f"[warmup] erro: {e}", flush=True)
+
+
+# Dispara warm-up no carregamento do módulo (1x, daemon)
+threading.Thread(target=_warmup_async, daemon=True).start()
+
+
 if __name__ == "__main__":
     # 0.0.0.0 permite acesso de outros dispositivos na mesma rede Wi-Fi
-    # (celular, outro PC). No celular, acesse http://<IP-DO-PC>:5000
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port, debug=True)

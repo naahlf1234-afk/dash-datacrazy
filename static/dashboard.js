@@ -150,50 +150,45 @@ function setCount(id, n) {
   if (el) el.textContent = n;
 }
 
-// ====== 8 CARDS DE MÉTRICAS ======
-async function loadMetricas() {
+// ====== CARDS DE MÉTRICAS (separados em 2 grupos pra cada um renderizar quando chega) ======
+async function loadMetricasBasicas() {
+  // Linha 1: Leads, Vendas, Futuros, % Conversão
   try {
-    const [resumo, ranking] = await Promise.all([
-      fetchJson("/api/resumo"),
-      fetchJson("/api/ranking"),
-    ]);
-
-    // Otimista: vendas (AGENDADO) + em_fechamento como "futuros"
-    // Realista: só AGENDADO
+    const resumo = await fetchJson("/api/resumo");
     const vendasConfirm = resumo.vendas;
     const futuros = resumo.em_fechamento;
     const totalVendas = currentMode === "otimista" ? vendasConfirm + futuros : vendasConfirm;
-
     document.getElementById("mLeads").textContent = resumo.total_leads.toLocaleString("pt-BR");
-    document.getElementById("mLeadsHint").textContent = `${ranking.filter(r => r.userId && r.userId !== "outros").length} vendedores`;
-
     document.getElementById("mVendas").textContent = totalVendas;
-    document.getElementById("mVendasHint").textContent =
-      `${vendasConfirm} confirm. · ${futuros} futuros`;
-
+    document.getElementById("mVendasHint").textContent = `${vendasConfirm} confirm. · ${futuros} futuros`;
     document.getElementById("mFuturos").textContent = futuros;
-
     const taxaConv = resumo.total_leads ? (totalVendas / resumo.total_leads * 100) : 0;
     document.getElementById("mConversao").textContent = fmtPct(taxaConv);
+  } catch (e) { console.error("loadMetricasBasicas:", e); }
+}
 
-    // FATURAMENTO / TICKET: por enquanto baseado em business.total quando preenchido
-    // (na Fase 2 trocamos pelo valor extraído do contrato)
-    const fatRes = await fetch("/api/faturamento").catch(() => null);
-    if (fatRes && fatRes.ok) {
-      const fat = await fatRes.json();
-      document.getElementById("mFaturamento").textContent = fmtBRL(fat.faturamento);
-      document.getElementById("mTicket").textContent = fmtBRL(fat.ticket_medio);
-      document.getElementById("mSeisMeses").textContent = fmtPct(fat.pct_6_meses);
-      document.getElementById("mAntecipadas").textContent = fmtPct(fat.pct_antecipadas);
-    } else {
-      document.getElementById("mFaturamento").textContent = "—";
-      document.getElementById("mTicket").textContent = "—";
-      document.getElementById("mSeisMeses").textContent = "—";
-      document.getElementById("mAntecipadas").textContent = "—";
-    }
-  } catch (e) {
-    console.error("loadMetricas:", e);
-  }
+async function loadMetricasFinanceiras() {
+  // Linha 2: Faturamento, Ticket, % 6 meses, % Antecipadas
+  try {
+    const fat = await fetchJson("/api/faturamento");
+    document.getElementById("mFaturamento").textContent = fmtBRL(fat.faturamento);
+    document.getElementById("mTicket").textContent = fmtBRL(fat.ticket_medio);
+    document.getElementById("mSeisMeses").textContent = fmtPct(fat.pct_6_meses);
+    document.getElementById("mAntecipadas").textContent = fmtPct(fat.pct_antecipadas);
+  } catch (e) { console.error("loadMetricasFinanceiras:", e); }
+}
+
+// Mantém função antiga pra compat (mode-tab usa)
+async function loadMetricas() {
+  await Promise.allSettled([loadMetricasBasicas(), loadMetricasFinanceiras()]);
+}
+
+async function loadVendedoresCount() {
+  try {
+    const ranking = await fetchJson("/api/ranking");
+    document.getElementById("mLeadsHint").textContent =
+      `${ranking.filter(r => r.userId && r.userId !== "outros").length} vendedores`;
+  } catch (e) { console.error("loadVendedoresCount:", e); }
 }
 
 // ====== FUNIL ======
@@ -568,33 +563,46 @@ async function loadGoldenBadge() {
 }
 
 // ====== LOAD ALL ======
+// Cada carregamento é independente: rendereiza assim que chega, sem bloquear os outros.
 async function loadAll() {
-  setStatus("carregando dados...");
-  try {
-    await Promise.all([
-      loadMetricas(),
-      loadFunil(),
-      loadRanking(),
-      loadConversas(),
-      loadFechamento(),
-      loadQuentes(),
-      loadGoldenBadge(),
-      loadSemProduto(),
-      loadSemContrato(),
-    ]);
-    const ts = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-    setStatus(`última atualização: ${ts}`);
-    const syncTime = document.getElementById("syncTime");
-    if (syncTime) syncTime.textContent = ts;
-    const syncFooter = document.getElementById("syncFooter");
-    if (syncFooter) syncFooter.textContent = `sync: ${ts}`;
-    // Vendedores grid recarrega se a aba já tiver sido visitada
-    const grid = document.getElementById("vendedoresGrid");
-    if (grid && grid.dataset.loaded === "1") { grid.dataset.loaded = "0"; loadVendedoresGrid(); }
-  } catch (e) {
-    setStatus(`erro: ${e.message}`, "err");
-    console.error(e);
-  }
+  setStatus("carregando dados…");
+  const ts = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const syncTime = document.getElementById("syncTime");
+  if (syncTime) syncTime.textContent = `${ts} (atualizando…)`;
+
+  const tasks = [
+    ["m-basicas", loadMetricasBasicas],
+    ["m-financ", loadMetricasFinanceiras],
+    ["vend-count", loadVendedoresCount],
+    ["funil", loadFunil],
+    ["ranking", loadRanking],
+    ["conversas", loadConversas],
+    ["fechamento", loadFechamento],
+    ["quentes", loadQuentes],
+    ["golden", loadGoldenBadge],
+    ["sem-produto", loadSemProduto],
+    ["sem-contrato", loadSemContrato],
+  ];
+
+  let pendentes = tasks.length;
+  const onDone = (name, ok) => {
+    pendentes--;
+    if (pendentes === 0) {
+      const ts2 = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      setStatus(`última atualização: ${ts2}`);
+      if (syncTime) syncTime.textContent = ts2;
+      const syncFooter = document.getElementById("syncFooter");
+      if (syncFooter) syncFooter.textContent = `sync: ${ts2}`;
+    }
+    if (!ok) console.warn(`[${name}] falhou`);
+  };
+  tasks.forEach(([name, fn]) => {
+    Promise.resolve(fn()).then(() => onDone(name, true)).catch(e => { console.error(name, e); onDone(name, false); });
+  });
+
+  // Vendedores grid recarrega se a aba já tiver sido visitada
+  const grid = document.getElementById("vendedoresGrid");
+  if (grid && grid.dataset.loaded === "1") { grid.dataset.loaded = "0"; loadVendedoresGrid(); }
 }
 
 // ====== DETEC PRODUTO ======
