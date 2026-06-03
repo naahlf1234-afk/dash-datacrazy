@@ -117,7 +117,7 @@ def resumo():
 # ===== EXTRAÇÃO DE CONTRATOS (FASE 2) =====
 _contracts_cache_lock = threading.Lock()
 _contracts_cache: dict[str, Any] = {"ts": 0.0, "data": []}
-CONTRACTS_CACHE_TTL = 600  # 10 min
+CONTRACTS_CACHE_TTL = 1800  # 30 min (extração de 139 contratos é cara)
 
 
 def _extract_one_contract(biz: dict) -> dict:
@@ -861,8 +861,13 @@ def _warmup_async():
     não pagar o custo de cold start do MCP. Daemon, erros silenciosos."""
     try:
         time.sleep(3)
+        # Estes 3 cobrem o que TODOS os endpoints principais precisam
         dc.all_businesses_api_pipeline()
         print("[warmup] businesses ok", flush=True)
+        dc.attendants()
+        print("[warmup] attendants ok", flush=True)
+        dc.conversations(status="opened")
+        print("[warmup] conversations ok", flush=True)
         _get_all_contracts_cached()
         print("[warmup] contratos ok", flush=True)
     except Exception as e:

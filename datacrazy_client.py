@@ -49,7 +49,7 @@ HEADERS = {
     "MCP-Protocol-Version": "2025-03-26",
 }
 
-CACHE_TTL_SECONDS = 300
+CACHE_TTL_SECONDS = 900  # 15 min: dados estáveis o suficiente, UX melhor
 
 
 class _Cache:
