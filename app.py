@@ -1296,6 +1296,121 @@ def _warmup_async():
         print(f"[warmup] erro: {e}", flush=True)
 
 
+# ===== LEADS RECORRENTES (entraram no funil mais de uma vez) =====
+import re as _re
+
+# Chaves candidatas a telefone no objeto lead, em ordem de preferência.
+_PHONE_KEYS = [
+    "phone", "phoneNumber", "phone_number", "whatsapp", "whatsappNumber",
+    "cellphone", "cellPhone", "celular", "mobile", "number", "telefone",
+    "contactNumber", "contact",
+]
+# Chaves que parecem número mas NÃO são telefone — nunca casar por elas.
+_NOT_PHONE_KEYS = {"id", "leadid", "businessid", "cpf", "cnpj", "document", "rg", "code"}
+
+
+def _extract_phone_raw(lead: dict) -> str | None:
+    for k in _PHONE_KEYS:
+        v = lead.get(k)
+        if isinstance(v, str) and sum(c.isdigit() for c in v) >= 8:
+            return v
+        if isinstance(v, (int, float)):
+            return str(int(v))
+    # fallback: varre qualquer string que pareça telefone
+    for k, v in lead.items():
+        if k.lower() in _NOT_PHONE_KEYS or not isinstance(v, str):
+            continue
+        digits = _re.sub(r"\D", "", v)
+        if 8 <= len(digits) <= 15:
+            return v
+    return None
+
+
+def _phone_key(raw: str | None) -> str | None:
+    """Normaliza pra uma chave estável: DDD + últimos 8 dígitos.
+    Colapsa variação do 9º dígito e código do país (+55)."""
+    if not raw:
+        return None
+    d = _re.sub(r"\D", "", str(raw))
+    if d.startswith("55") and len(d) > 11:
+        d = d[2:]
+    if len(d) >= 11:          # DDD (2) + 9 + 8 dígitos
+        return d[-11:-9] + d[-8:]
+    if len(d) >= 10:          # DDD (2) + 8 dígitos
+        return d[-10:-8] + d[-8:]
+    if len(d) >= 8:           # sem DDD: casa só pelos últimos 8
+        return d[-8:]
+    return None
+
+
+@app.route("/api/leads-recorrentes")
+def leads_recorrentes():
+    """Quantos leads (por telefone) entraram no funil mais de uma vez.
+    Um telefone com 2+ negócios no pipeline API = lead recorrente. Cobre tanto
+    o mesmo contato reaproveitado quanto o reimportado como lead novo."""
+    df, dt = _get_period()
+    businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
+
+    lead_ids = list({b["leadId"] for b in businesses if b.get("leadId")})
+    leads = dc.lead_by_ids(lead_ids)
+    leads_by_id = {l["id"]: l for l in leads if l.get("id")}
+
+    # detecta qual campo virou telefone (pra debug/validação pós-deploy)
+    campo_detectado = None
+    for l in leads:
+        for k in _PHONE_KEYS:
+            v = l.get(k)
+            if isinstance(v, (str, int, float)) and sum(c.isdigit() for c in str(v)) >= 8:
+                campo_detectado = k
+                break
+        if campo_detectado:
+            break
+
+    # mapeia cada negócio -> chave de telefone
+    grupos: dict[str, dict] = defaultdict(lambda: {"negocios": 0, "leadIds": set(), "leadName": None})
+    sem_telefone = 0
+    for b in businesses:
+        lead = leads_by_id.get(b.get("leadId"), {})
+        key = _phone_key(_extract_phone_raw(lead))
+        if not key:
+            sem_telefone += 1
+            continue
+        g = grupos[key]
+        g["negocios"] += 1
+        g["leadIds"].add(b.get("leadId"))
+        if not g["leadName"]:
+            g["leadName"] = b.get("leadName")
+
+    recorrentes = {k: g for k, g in grupos.items() if g["negocios"] >= 2}
+    total_pessoas = len(grupos)              # telefones distintos identificados
+    n_recorrentes = len(recorrentes)
+    negocios_recorrentes = sum(g["negocios"] for g in recorrentes.values())
+
+    # top ofensores (mais entradas), anonimizado no telefone
+    top = sorted(recorrentes.values(), key=lambda g: g["negocios"], reverse=True)[:20]
+    top_lista = [
+        {
+            "leadName": g["leadName"],
+            "entradas": g["negocios"],
+            "leads_distintos": len(g["leadIds"]),
+        }
+        for g in top
+    ]
+
+    pct = round(n_recorrentes / total_pessoas * 100, 1) if total_pessoas else 0
+
+    return jsonify({
+        "leads_recorrentes": n_recorrentes,
+        "pessoas_identificadas": total_pessoas,
+        "pct_recorrentes": pct,
+        "negocios_gerados_por_recorrentes": negocios_recorrentes,
+        "negocios_total": len(businesses),
+        "negocios_sem_telefone": sem_telefone,
+        "campo_telefone_detectado": campo_detectado,
+        "top_recorrentes": top_lista,
+    })
+
+
 # Dispara warm-up no carregamento do módulo (1x, daemon)
 threading.Thread(target=_warmup_async, daemon=True).start()
 
