@@ -47,6 +47,13 @@ HEADERS = {
     "Accept": "application/json, text/event-stream",
     "Authorization": f"Bearer {TOKEN}",
     "MCP-Protocol-Version": "2025-03-26",
+    # O Cloudflare do datacrazy passou a bloquear (403) o User-Agent padrão do
+    # python-requests. Um UA de navegador passa normalmente. Sem isto, TODA
+    # chamada ao MCP retorna 403 e o dashboard inteiro fica sem dados.
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    ),
 }
 
 CACHE_TTL_SECONDS = 900  # 15 min: dados estáveis o suficiente, UX melhor
