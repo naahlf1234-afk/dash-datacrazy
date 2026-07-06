@@ -113,7 +113,7 @@ function setupTabs() {
       });
       // Carrega Vendedores e Relatórios lazy quando suas abas abrem
       if (target === "vendedores") loadVendedoresGrid();
-      if (target === "relatorios") loadRelatorioFechamentos();
+      if (target === "relatorios") { loadRelatorioFechamentos(); loadRecorrencia(); }
       window.scrollTo({ top: 0, behavior: "smooth" });
     });
   });
@@ -238,6 +238,33 @@ async function loadFunil() {
       },
     },
   });
+}
+
+// ====== LEADS RECORRENTES (voltaram a conversar) ======
+async function loadRecorrencia() {
+  const tbody = document.querySelector("#tableRecorrencia tbody");
+  const resumo = document.getElementById("recResumo");
+  try {
+    const d = await fetchJson("/api/leads-recorrentes");
+    setCount("recCount", d.recorrentes);
+    if (resumo) resumo.innerHTML = `
+      <span class="carteira-stat carteira-stat-venda">Voltaram: <b>${d.recorrentes}</b> (${d.pct_recorrentes}%)</span>
+      <span class="carteira-stat">Pessoas no total: <b>${d.pessoas}</b></span>
+      <span class="carteira-stat">Conversas de quem voltou: <b>${d.conversas_recorrentes}</b> de ${d.conversas_total}</span>
+    `;
+    if (tbody) tbody.innerHTML = d.distribuicao.map(row => {
+      const pct = d.pessoas ? (row.pessoas / d.pessoas * 100).toFixed(1) : "0.0";
+      const hot = row.vezes >= 2 ? ' style="background:#fff7ed"' : "";
+      return `<tr${hot}>
+        <td>${row.vezes}x${row.vezes >= 2 ? " 🔁" : ""}</td>
+        <td class="num">${row.pessoas}</td>
+        <td class="num">${pct}%</td>
+      </tr>`;
+    }).join("");
+  } catch (e) {
+    console.error("loadRecorrencia:", e);
+    if (tbody) tbody.innerHTML = `<tr><td colspan="3" style="color:var(--danger)">erro ao carregar: ${e.message}</td></tr>`;
+  }
 }
 
 // ====== RANKING ======

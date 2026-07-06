@@ -1296,6 +1296,75 @@ def _warmup_async():
         print(f"[warmup] erro: {e}", flush=True)
 
 
+# ===== LEADS RECORRENTES (voltaram a conversar) =====
+import re as _re
+
+
+def _phone_key(raw) -> str | None:
+    """Chave estável de telefone: DDD + últimos 8 dígitos.
+    Colapsa variação do 9º dígito e o código do país (+55)."""
+    if not raw:
+        return None
+    d = _re.sub(r"\D", "", str(raw))
+    if d.startswith("55") and len(d) > 11:
+        d = d[2:]
+    if len(d) >= 11:
+        return d[-11:-9] + d[-8:]
+    if len(d) >= 10:
+        return d[-10:-8] + d[-8:]
+    if len(d) >= 8:
+        return d[-8:]
+    return None
+
+
+@app.route("/api/leads-recorrentes")
+def leads_recorrentes():
+    """Pessoas (por telefone) que entraram no funil mais de uma vez, medido por
+    CONVERSA. A conversa traz contactPhone direto — uma pessoa com 2+ conversas
+    voltou. É barato: um sweep de conversation_list, sem lookup de lead."""
+    df, dt = _get_period()
+    eff_from = _effective_from(df)
+    convs = dc.conversations(status="all")
+
+    grupos: dict[str, dict] = defaultdict(lambda: {"n": 0, "nome": None})
+    for c in convs:
+        if not _is_in_period(c.get("lastMessageDate"), eff_from, dt):
+            continue
+        key = _phone_key(c.get("contactPhone") or c.get("contactId"))
+        if not key:
+            continue
+        g = grupos[key]
+        g["n"] += 1
+        if not g["nome"]:
+            g["nome"] = c.get("contactName") or c.get("name")
+
+    total = len(grupos)
+    dist = Counter(g["n"] for g in grupos.values())
+    max_n = max(dist) if dist else 0
+    distribuicao = [
+        {"vezes": n, "pessoas": dist[n]}
+        for n in range(1, max_n + 1) if dist.get(n)
+    ]
+    recorrentes = sum(p for n, p in dist.items() if n >= 2)
+    conversas_total = sum(g["n"] for g in grupos.values())
+    conversas_recorrentes = sum(g["n"] for g in grupos.values() if g["n"] >= 2)
+    top = sorted(
+        (g for g in grupos.values() if g["n"] >= 2),
+        key=lambda g: g["n"], reverse=True,
+    )[:15]
+    pct = round(recorrentes / total * 100, 1) if total else 0
+
+    return jsonify({
+        "pessoas": total,
+        "recorrentes": recorrentes,
+        "pct_recorrentes": pct,
+        "conversas_total": conversas_total,
+        "conversas_recorrentes": conversas_recorrentes,
+        "distribuicao": distribuicao,
+        "top": [{"nome": t["nome"], "vezes": t["n"]} for t in top],
+    })
+
+
 # Dispara warm-up no carregamento do módulo (1x, daemon)
 threading.Thread(target=_warmup_async, daemon=True).start()
 
