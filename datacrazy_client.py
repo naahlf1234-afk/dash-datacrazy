@@ -218,6 +218,33 @@ def conversations(status: str = "all") -> list[dict]:
     return data
 
 
+def conversation_phone_stats(status: str = "all", page_size: int = 100, max_pages: int = 400):
+    """Pagina conversation_list acumulando SÓ contagem por telefone e nome —
+    descarta cada página em seguida. Não segura as ~13k conversas em memória
+    nem cacheia a lista (crucial no Render free de 512MB).
+
+    Retorna (counts, names, min_last_msg_por_fone) onde:
+      counts[phone_key] = nº de conversas
+      names[phone_key]  = nome de contato (primeiro visto)
+    Cada item do stream é (contactPhone/contactId, contactName/name, lastMessageDate).
+    O agrupamento por telefone fica a cargo do chamador (que tem _phone_key)."""
+    skip = 0
+    for _ in range(max_pages):
+        result = _call_tool("conversation_list", {"status": status, "limit": page_size, "skip": skip})
+        chunk = result.get("data", [])
+        if not chunk:
+            break
+        for c in chunk:
+            yield (
+                c.get("contactPhone") or c.get("contactId"),
+                c.get("contactName") or c.get("name"),
+                c.get("lastMessageDate"),
+            )
+        if len(chunk) < page_size:
+            break
+        skip += page_size
+
+
 def loss_reasons() -> list[dict]:
     key = ("loss",)
     cached = _cache.get(key)

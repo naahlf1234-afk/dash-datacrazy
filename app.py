@@ -1318,35 +1318,34 @@ def _phone_key(raw) -> str | None:
 
 
 def _compute_recorrencia() -> dict:
-    """Faz o sweep de conversas e monta a distribuição de recorrência por
-    telefone, na janela da operação atual (>= OPERATION_START). Pesado
-    (~13k conversas): roda em background, NUNCA dentro do request."""
-    convs = dc.conversations(status="all")
-    grupos: dict[str, dict] = defaultdict(lambda: {"n": 0, "nome": None})
-    for c in convs:
-        if not _is_in_period(c.get("lastMessageDate"), OPERATION_START_DATE, None):
+    """Monta a distribuição de recorrência por telefone na janela da operação
+    atual (>= OPERATION_START). Consome o stream frugal de conversas (não
+    segura as ~13k em memória). Roda em background, NUNCA dentro do request."""
+    counts: dict[str, int] = defaultdict(int)
+    names: dict[str, str] = {}
+    for phone, nome, last_msg in dc.conversation_phone_stats(status="all"):
+        if not _is_in_period(last_msg, OPERATION_START_DATE, None):
             continue
-        key = _phone_key(c.get("contactPhone") or c.get("contactId"))
+        key = _phone_key(phone)
         if not key:
             continue
-        g = grupos[key]
-        g["n"] += 1
-        if not g["nome"]:
-            g["nome"] = c.get("contactName") or c.get("name")
+        counts[key] += 1
+        if key not in names and nome:
+            names[key] = nome
 
-    total = len(grupos)
-    dist = Counter(g["n"] for g in grupos.values())
+    total = len(counts)
+    dist = Counter(counts.values())
     max_n = max(dist) if dist else 0
     distribuicao = [
         {"vezes": n, "pessoas": dist[n]}
         for n in range(1, max_n + 1) if dist.get(n)
     ]
     recorrentes = sum(p for n, p in dist.items() if n >= 2)
-    conversas_total = sum(g["n"] for g in grupos.values())
-    conversas_recorrentes = sum(g["n"] for g in grupos.values() if g["n"] >= 2)
+    conversas_total = sum(counts.values())
+    conversas_recorrentes = sum(n for n in counts.values() if n >= 2)
     top = sorted(
-        (g for g in grupos.values() if g["n"] >= 2),
-        key=lambda g: g["n"], reverse=True,
+        ((names.get(k, "—"), n) for k, n in counts.items() if n >= 2),
+        key=lambda t: t[1], reverse=True,
     )[:15]
     pct = round(recorrentes / total * 100, 1) if total else 0
     return {
@@ -1356,7 +1355,7 @@ def _compute_recorrencia() -> dict:
         "conversas_total": conversas_total,
         "conversas_recorrentes": conversas_recorrentes,
         "distribuicao": distribuicao,
-        "top": [{"nome": t["nome"], "vezes": t["n"]} for t in top],
+        "top": [{"nome": nome, "vezes": n} for nome, n in top],
     }
 
 
@@ -1365,19 +1364,26 @@ _recorrencia_lock = threading.Lock()
 
 
 def _recorrencia_refresher():
-    """Recalcula a recorrência a cada 10 min em background. Assim o endpoint
+    """Recalcula a recorrência periodicamente em background. Assim o endpoint
     devolve resultado pronto na hora e nunca estoura o timeout de 30s do proxy
-    do Render fazendo o sweep dentro do request."""
+    do Render fazendo o sweep dentro do request. Espera o warmup assentar antes
+    de começar pra não competir por CPU/memória no boot."""
+    time.sleep(75)  # deixa o warmup (businesses/contratos) assentar primeiro
     while True:
+        ok = False
         try:
             payload = _compute_recorrencia()
             with _recorrencia_lock:
                 _recorrencia_cache["data"] = payload
                 _recorrencia_cache["ts"] = time.time()
+                _recorrencia_cache["erro"] = None
+            ok = True
             print("[recorrencia] cache atualizado", flush=True)
         except Exception as e:
+            with _recorrencia_lock:
+                _recorrencia_cache["erro"] = str(e)[:200]
             print(f"[recorrencia] erro: {e}", flush=True)
-        time.sleep(600)
+        time.sleep(900 if ok else 120)  # sucesso: 15min; erro: tenta de novo em 2min
 
 
 @app.route("/api/leads-recorrentes")
@@ -1387,9 +1393,11 @@ def leads_recorrentes():
     with _recorrencia_lock:
         data = _recorrencia_cache["data"]
         ts = _recorrencia_cache["ts"]
+        erro = _recorrencia_cache.get("erro")
     if data is None:
         return jsonify({
             "calculando": True,
+            "ultimo_erro": erro,
             "pessoas": 0, "recorrentes": 0, "pct_recorrentes": 0,
             "conversas_total": 0, "conversas_recorrentes": 0,
             "distribuicao": [], "top": [],
