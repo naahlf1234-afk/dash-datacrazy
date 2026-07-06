@@ -1348,6 +1348,14 @@ def leads_recorrentes():
     """Quantos leads (por telefone) entraram no funil mais de uma vez.
     Um telefone com 2+ negócios no pipeline API = lead recorrente. Cobre tanto
     o mesmo contato reaproveitado quanto o reimportado como lead novo."""
+    try:
+        return _leads_recorrentes_impl()
+    except Exception as exc:  # debug temporário — remover depois
+        import traceback
+        return jsonify({"erro": str(exc), "trace": traceback.format_exc()[-2500:]}), 200
+
+
+def _leads_recorrentes_impl():
     df, dt = _get_period()
     businesses = _filter_period(dc.all_businesses_api_pipeline(), df, dt)
 
