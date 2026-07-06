@@ -1317,18 +1317,14 @@ def _phone_key(raw) -> str | None:
     return None
 
 
-@app.route("/api/leads-recorrentes")
-def leads_recorrentes():
-    """Pessoas (por telefone) que entraram no funil mais de uma vez, medido por
-    CONVERSA. A conversa traz contactPhone direto — uma pessoa com 2+ conversas
-    voltou. É barato: um sweep de conversation_list, sem lookup de lead."""
-    df, dt = _get_period()
-    eff_from = _effective_from(df)
+def _compute_recorrencia() -> dict:
+    """Faz o sweep de conversas e monta a distribuição de recorrência por
+    telefone, na janela da operação atual (>= OPERATION_START). Pesado
+    (~13k conversas): roda em background, NUNCA dentro do request."""
     convs = dc.conversations(status="all")
-
     grupos: dict[str, dict] = defaultdict(lambda: {"n": 0, "nome": None})
     for c in convs:
-        if not _is_in_period(c.get("lastMessageDate"), eff_from, dt):
+        if not _is_in_period(c.get("lastMessageDate"), OPERATION_START_DATE, None):
             continue
         key = _phone_key(c.get("contactPhone") or c.get("contactId"))
         if not key:
@@ -1353,8 +1349,7 @@ def leads_recorrentes():
         key=lambda g: g["n"], reverse=True,
     )[:15]
     pct = round(recorrentes / total * 100, 1) if total else 0
-
-    return jsonify({
+    return {
         "pessoas": total,
         "recorrentes": recorrentes,
         "pct_recorrentes": pct,
@@ -1362,11 +1357,51 @@ def leads_recorrentes():
         "conversas_recorrentes": conversas_recorrentes,
         "distribuicao": distribuicao,
         "top": [{"nome": t["nome"], "vezes": t["n"]} for t in top],
-    })
+    }
+
+
+_recorrencia_cache: dict[str, Any] = {"ts": 0.0, "data": None}
+_recorrencia_lock = threading.Lock()
+
+
+def _recorrencia_refresher():
+    """Recalcula a recorrência a cada 10 min em background. Assim o endpoint
+    devolve resultado pronto na hora e nunca estoura o timeout de 30s do proxy
+    do Render fazendo o sweep dentro do request."""
+    while True:
+        try:
+            payload = _compute_recorrencia()
+            with _recorrencia_lock:
+                _recorrencia_cache["data"] = payload
+                _recorrencia_cache["ts"] = time.time()
+            print("[recorrencia] cache atualizado", flush=True)
+        except Exception as e:
+            print(f"[recorrencia] erro: {e}", flush=True)
+        time.sleep(600)
+
+
+@app.route("/api/leads-recorrentes")
+def leads_recorrentes():
+    """Pessoas (por telefone) que voltaram a conversar (2+ conversas) na operação
+    atual. Serve sempre o resultado pré-calculado em background."""
+    with _recorrencia_lock:
+        data = _recorrencia_cache["data"]
+        ts = _recorrencia_cache["ts"]
+    if data is None:
+        return jsonify({
+            "calculando": True,
+            "pessoas": 0, "recorrentes": 0, "pct_recorrentes": 0,
+            "conversas_total": 0, "conversas_recorrentes": 0,
+            "distribuicao": [], "top": [],
+        })
+    return jsonify({**data, "atualizado_em": ts})
 
 
 # Dispara warm-up no carregamento do módulo (1x, daemon)
 threading.Thread(target=_warmup_async, daemon=True).start()
+
+# Recalcula a recorrência de leads em background (não bloqueia requests)
+threading.Thread(target=_recorrencia_refresher, daemon=True).start()
 
 # Inicia monitor de FECHAMENTO em alta frequência (1x, daemon)
 fechamento_monitor.start()

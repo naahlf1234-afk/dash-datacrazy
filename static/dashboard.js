@@ -246,6 +246,13 @@ async function loadRecorrencia() {
   const resumo = document.getElementById("recResumo");
   try {
     const d = await fetchJson("/api/leads-recorrentes");
+    if (d.calculando) {
+      setCount("recCount", "…");
+      if (resumo) resumo.innerHTML = `<span class="carteira-stat">Calculando recorrência… abre de novo em instantes.</span>`;
+      if (tbody) tbody.innerHTML = "";
+      setTimeout(loadRecorrencia, 8000);
+      return;
+    }
     setCount("recCount", d.recorrentes);
     if (resumo) resumo.innerHTML = `
       <span class="carteira-stat carteira-stat-venda">Voltaram: <b>${d.recorrentes}</b> (${d.pct_recorrentes}%)</span>
