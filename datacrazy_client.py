@@ -56,7 +56,8 @@ HEADERS = {
     ),
 }
 
-CACHE_TTL_SECONDS = 900  # 15 min: dados estáveis o suficiente, UX melhor
+CACHE_TTL_SECONDS = 1800  # 30 min: o warmer em loop força refresh a cada 10min,
+# então na prática o cache nunca expira em request; TTL é só rede de segurança.
 
 
 class _Cache:
@@ -139,11 +140,12 @@ def clear_cache():
     _cache.clear()
 
 
-def businesses_by_stage(stage_id: str) -> list[dict]:
+def businesses_by_stage(stage_id: str, force: bool = False) -> list[dict]:
     key = ("biz_stage", stage_id)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
+    if not force:
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
     data = _paginate("business_list_by_stage", {"stageId": stage_id})
     _cache.set(key, data)
     return data
@@ -159,15 +161,16 @@ def businesses_by_attendant(user_id: str) -> list[dict]:
     return data
 
 
-def all_businesses_api_pipeline() -> list[dict]:
+def all_businesses_api_pipeline(force: bool = False) -> list[dict]:
     """Todos os negócios do pipeline API, agrupados via estágios."""
     key = ("biz_all_api",)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
+    if not force:
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
     out: list[dict] = []
     for stage in STAGES_API:
-        out.extend(businesses_by_stage(stage["id"]))
+        out.extend(businesses_by_stage(stage["id"], force=force))
     _cache.set(key, out)
     return out
 
@@ -208,11 +211,12 @@ def leads_count(date_from: str | None = None, date_to: str | None = None) -> int
     return count
 
 
-def conversations(status: str = "all") -> list[dict]:
+def conversations(status: str = "all", force: bool = False) -> list[dict]:
     key = ("conv", status)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
+    if not force:
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
     data = _paginate("conversation_list", {"status": status})
     _cache.set(key, data)
     return data
@@ -265,11 +269,12 @@ def tags() -> list[dict]:
     return data
 
 
-def attendants() -> list[dict]:
+def attendants(force: bool = False) -> list[dict]:
     key = ("attendants",)
-    cached = _cache.get(key)
-    if cached is not None:
-        return cached
+    if not force:
+        cached = _cache.get(key)
+        if cached is not None:
+            return cached
     data = _paginate("attendant_list", {})
     _cache.set(key, data)
     return data

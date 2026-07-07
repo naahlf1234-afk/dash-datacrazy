@@ -1277,23 +1277,36 @@ def leads_fechamento():
     return jsonify(result)
 
 
-# ===== WARM-UP: pré-carrega caches em background na startup =====
+# ===== WARM-UP: mantém os caches pesados SEMPRE quentes em background =====
+# No Render free (1 worker, borda corta em ~30s) um endpoint que faz o fetch
+# pesado (~10k negócios) na hora estoura o limite quando o cache esfria. Por isso
+# um loop força o refresh a cada 10min (< TTL): os endpoints nunca fazem fetch
+# pesado dentro do request, só leem cache quente.
+WARM_INTERVAL = 600  # 10 min
+
+
 def _warmup_async():
-    """Aquece caches assim que o servidor sobe pra primeira request do user
-    não pagar o custo de cold start do MCP. Daemon, erros silenciosos."""
-    try:
-        time.sleep(3)
-        # Estes 3 cobrem o que TODOS os endpoints principais precisam
-        dc.all_businesses_api_pipeline()
-        print("[warmup] businesses ok", flush=True)
-        dc.attendants()
-        print("[warmup] attendants ok", flush=True)
-        dc.conversations(status="opened")
-        print("[warmup] conversations ok", flush=True)
-        _get_all_contracts_cached()
-        print("[warmup] contratos ok", flush=True)
-    except Exception as e:
-        print(f"[warmup] erro: {e}", flush=True)
+    """Aquece e RE-aquece os caches em loop. Daemon, erros silenciosos."""
+    time.sleep(3)
+    ciclo = 0
+    while True:
+        force = ciclo > 0  # 1º ciclo popula; seguintes forçam refresh
+        try:
+            dc.all_businesses_api_pipeline(force=force)
+            dc.attendants(force=force)
+            dc.conversations(status="opened", force=force)
+            print(f"[warmup] core ok (ciclo {ciclo}, force={force})", flush=True)
+        except Exception as e:
+            print(f"[warmup] erro core: {e}", flush=True)
+        # Contratos são MUITO pesados (extração de ~139) — atualiza a cada ~30min.
+        if ciclo % 3 == 0:
+            try:
+                _get_all_contracts_cached()
+                print("[warmup] contratos ok", flush=True)
+            except Exception as e:
+                print(f"[warmup] erro contratos: {e}", flush=True)
+        ciclo += 1
+        time.sleep(WARM_INTERVAL)
 
 
 # ===== LEADS RECORRENTES (voltaram a conversar) =====
